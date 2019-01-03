@@ -1,4 +1,3 @@
-(** Utility functions to handle ranges. *)
 module Error = struct
   open Format
   open Lexing
@@ -56,9 +55,8 @@ module Lexing = struct
     lexbuf.lex_curr_p <- {lexbuf.lex_curr_p with pos_bol = 0}
 end
 
-(** Utility functions for List module. *)
-module List = struct
 
+module List = struct
   (** Zip two lists. The length of the result will be the same as the length of the shorter list. *)
   let zip l1 l2 =
     let rec zip' l1 l2 l = match l1, l2 with

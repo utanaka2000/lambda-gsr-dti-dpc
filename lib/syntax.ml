@@ -1,42 +1,31 @@
 open Utils.Error
+(* Types *)
+type basety =
+  | TyBool
+  | TyInt
+  | TyUnit
 
-(** Identifier used for names of variables. *)
+type ty =
+  | TyPureVar of int
+  | TyVar of tyvar
+  | TyBase of basety
+  | TyFun of ty * ty * ty * ty
+  | TyDyn
+and tyvar = int * ty option ref
+
+type tysc = TyScheme of tyvar list * ty
+
+let tysc_of_ty u = TyScheme ([], u)
+
 type id = string
 
-(** Module used to implement environment and type environment. *)
+(* Type Environment *)
 module Environment = Map.Make (
   struct
     type t = id
     let compare (x : id) y = compare x y
   end
   )
-
-type binop = Plus | Minus | Mult | Div | Mod | Eq | Neq | Lt | Lte | Gt | Gte
-
-type ty =
-  | TyDyn
-  | TyVar of tyvar
-  | TyInt
-  | TyBool
-  | TyUnit
-  | TyFun of ty * ty
-and
-(* int value is used to identify type variables.
- * ty option ref value is used to implement instantiation.
- * Some u means this variable is instantiated with u. *)
-  tyvar = int * ty option ref
-
-type tysc = TyScheme of tyvar list * ty
-
-let tysc_of_ty u = TyScheme ([], u)
-
-(** Returns true if the given argument is a ground type. Othewise returns false. *)
-let is_ground = function
-  | TyInt | TyBool | TyUnit -> true
-  | TyFun (u1, u2) when u1 = TyDyn && u2 = TyDyn -> true
-  | _ -> false
-
-(* Set of type variables used for let polymorphism *)
 
 (** Module for a set of type variables. *)
 module TV = struct
@@ -53,7 +42,8 @@ end
 let rec ftv_ty: ty -> TV.t = function
   | TyVar (_, { contents = None } as x) -> TV.singleton x
   | TyVar (_, { contents = Some u }) -> ftv_ty u
-  | TyFun (u1, u2) -> TV.union (ftv_ty u1) (ftv_ty u2)
+  | TyFun (u1, u2, u3, u4) ->
+    TV.big_union [ftv_ty u1; ftv_ty u2; ftv_ty u3; ftv_ty u4; ] (* ? *)
   | _ -> TV.empty
 
 let ftv_tysc: tysc -> TV.t = function
@@ -62,79 +52,98 @@ let ftv_tysc: tysc -> TV.t = function
 let ftv_tyenv (env: tysc Environment.t): TV.t =
   Environment.fold (fun _ us vars -> TV.union vars (ftv_tysc us)) env TV.empty
 
-(** Syntax of the surface language, the ITGL with extensions. *)
-module ITGL = struct
-  type constr =
-    | CEqual of ty * ty
-    | CConsistent of ty * ty
+let tyDynFun = TyFun (TyDyn, TyDyn, TyDyn, TyDyn)
 
+(* Syntax *)
+type const =
+  | ConstBool of bool
+  | ConstInt of int
+  | ConstUnit
+
+type binop =
+  | Plus
+  | Minus
+  | Mult
+  | Div
+  | Equal
+  | Gt
+  | Lt
+
+module GSR = struct
   type exp =
     | Var of range * id * ty list ref
-    | IConst of range * int
-    | BConst of range * bool
-    | UConst of range
+    | Const of range * const
     | BinOp of range * binop * exp * exp
-    | AscExp of range * exp * ty
-    | IfExp of range * exp * exp * exp
-    | FunEExp of range * id * ty * exp
-    | FunIExp of range * id * ty * exp
-    | FixEExp of range * id * id * ty * ty * exp
-    | FixIExp of range * id * id * ty * ty * exp
-    | AppExp of range * exp * exp
-    | LetExp of range * id * exp * exp
+    | Fun of range * ty * id * ty * exp (* λ^12:3.4 *)
+    | App of range * exp * exp
+    | Shift of range * id * ty * exp (* S1:2.3 *)
+    | Reset of range * exp * ty (* <1>^2 *)
+    | If of range * exp * exp * exp
+    | Consq of range * exp * exp
+    | Pure of range * exp
+    | Let of range * id * exp * exp
 
   let range_of_exp = function
     | Var (r, _, _)
-    | IConst (r, _)
-    | BConst (r, _)
-    | UConst r
-    | AscExp (r, _, _)
+    | Const (r, _)
     | BinOp (r, _, _, _)
-    | IfExp (r, _, _, _)
-    | FunEExp (r, _, _, _)
-    | FunIExp (r, _, _, _)
-    | FixEExp (r, _, _, _, _, _)
-    | FixIExp (r, _, _, _, _, _)
-    | AppExp (r, _, _)
-    | LetExp (r, _, _, _) -> r
+    | Fun (r, _, _, _, _)
+    | App (r, _, _)
+    | Shift (r, _, _, _)
+    | Reset (r, _, _)
+    | If (r, _, _, _)
+    | Consq (r, _, _)
+    | Pure (r, _)
+    | Let (r, _, _, _) -> r
 
-  let rec tv_exp: exp -> TV.t = function
-    | Var _
-    | IConst _
-    | BConst _
-    | UConst _ -> TV.empty
-    | BinOp (_, _, e1, e2) -> TV.union (tv_exp e1) (tv_exp e2)
-    | AscExp (_, e, u) -> TV.union (tv_exp e) (ftv_ty u)
-    | IfExp (_, e1, e2, e3) -> TV.big_union @@ List.map tv_exp [e1; e2; e3]
-    | FunEExp (_, _, u, e)
-    | FunIExp (_, _, u, e) -> TV.union (ftv_ty u) (tv_exp e)
-    | FixEExp (_, _, _, u1, _, e)
-    | FixIExp (_, _, _, u1, _, e) -> TV.union (ftv_ty u1) (tv_exp e)
-    | AppExp (_, e1, e2) -> TV.union (tv_exp e1) (tv_exp e2)
-    | LetExp (_, _, e1, e2) -> TV.union (tv_exp e1) (tv_exp e2)
-
-  let rec ftv_exp: exp -> TV.t = function
-    | Var _
-    | IConst _
-    | BConst _
-    | UConst _ -> TV.empty
-    | BinOp (_, _, e1, e2) -> TV.union (ftv_exp e1) (ftv_exp e2)
-    | AscExp (_, e, u) -> TV.union (ftv_exp e) (ftv_ty u)
-    | IfExp (_, e1, e2, e3) -> TV.big_union @@ List.map ftv_exp [e1; e2; e3]
-    | FunEExp (_, _, u, e) -> TV.union (ftv_ty u) (ftv_exp e)
-    | FunIExp (_, _, _, e) -> ftv_exp e
-    | FixEExp (_, _, _, u1, _, e) -> TV.union (ftv_ty u1) (ftv_exp e)
-    | FixIExp (_, _, _, _, _, e) -> ftv_exp e
-    | AppExp (_, e1, e2) -> TV.union (ftv_exp e1) (ftv_exp e2)
-    | LetExp (_, _, e1, e2) -> TV.union (ftv_exp e1) (ftv_exp e2)
+  type directive =
+    | BoolDir of string * bool
 
   type program =
     | Exp of exp
-    | LetDecl of id * exp
+    | Directive of directive
+
+  let map f_ty f_exp = function
+    | Var (r, x, tyl) -> let tyl' = List.map f_ty !tyl in Var(r, x, ref tyl')
+    | Const _ as e -> e
+    | BinOp (r, op, e1, e2) -> BinOp (r, op, f_exp e1, f_exp e2)
+    | Fun (r, g, x1, x1_t, e) -> Fun (r, f_ty g, x1, f_ty x1_t, f_exp e)
+    | App (r, e1, e2) -> App (r, f_exp e1, f_exp e2)
+    | Shift (r, k, k_t, e) -> Shift (r, k, f_ty k_t, f_exp e)
+    | Reset (r, e, u) -> Reset (r, f_exp e, f_ty u)
+    | If (r, e1, e2, e3) -> If (r, f_exp e1, f_exp e2, f_exp e3)
+    | Consq (r, e1, e2) -> Consq (r, f_exp e1, f_exp e2)
+    | Pure (r, e) -> Pure (r, f_exp e)
+    | Let (r, id,e1,e2) -> Let (r, id, f_exp e1,f_exp e2)
+
+  let rec tv_exp: exp -> TV.t = function
+    | Var _
+    | Const _ -> TV.empty
+    | BinOp (_, _, e1, e2) -> TV.union (tv_exp e1) (tv_exp e2)
+    | If (_,  e1, e2, e3) -> TV.big_union @@ List.map tv_exp [e1; e2; e3]
+    | Fun (_, g, _, x1_t, e) -> TV.big_union @@ [ftv_ty x1_t; tv_exp e; ftv_ty g]
+    | App (_, e1, e2) -> TV.union (tv_exp e1) (tv_exp e2)
+    | Let (_, _, e1, e2) -> TV.union (tv_exp e1) (tv_exp e2)
+    | Shift (_, _, k_t, e) -> TV.union (ftv_ty k_t) (tv_exp e)
+    | Reset (_, e, u) -> TV.union (ftv_ty u) (tv_exp e)
+    | Pure (_, e) -> tv_exp e
+    | Consq (_, e1, e2) -> TV.union (tv_exp e1) (tv_exp e2)
+
+  let rec ftv_exp: exp -> TV.t = function
+    | Var _
+    | Const _ -> TV.empty
+    | BinOp (_, _, e1, e2) -> TV.union (ftv_exp e1) (ftv_exp e2)
+    | If (_, e1, e2, e3) -> TV.big_union @@ List.map ftv_exp [e1; e2; e3]
+    | Fun (_, _, _, _, e) -> ftv_exp e            (*????*)
+    | App (_, e1, e2) -> TV.union (ftv_exp e1) (ftv_exp e2)
+    | Let (_, _, e1, e2) -> TV.union (ftv_exp e1) (ftv_exp e2)
+    | Shift (_, _, _, e) -> ftv_exp e
+    | Reset (_, e, _) -> ftv_exp e
+    | Pure (_, e) -> ftv_exp e
+    | Consq (_, e1, e2) -> TV.union (ftv_exp e1) (ftv_exp e2)
 end
 
-(** Syntax of the blame calculus with dynamic type inference. *)
-module CC = struct
+module CSR = struct
   type tyarg = Ty of ty | TyNu
 
   type polarity = Pos | Neg
@@ -144,76 +153,71 @@ module CC = struct
 
   type exp =
     | Var of range * id * tyarg list
-    | IConst of range * int
-    | BConst of range * bool
-    | UConst of range
+    | Const of range * const
     | BinOp of range * binop * exp * exp
-    | IfExp of range * exp * exp * exp
-    | FunExp of range * id * ty * exp
-    | FixExp of range * id * id * ty * ty * exp
-    | AppExp of range * exp * exp
-    | CastExp of range * exp * ty * ty * polarity
-    | LetExp of range * id * tyvar list * exp * exp
+    | Fun of range * ty * id * ty * exp
+    | App of range * exp * exp
+    | Shift of range * id * ty * exp
+    | Reset of range * exp * ty
+    | If of range * exp * exp * exp
+    | Consq of range * exp * exp
+    | Cast of range * exp * ty * ty * polarity
+    | Pure of range * ty * exp
+    | Let of range * id * tyvar list * exp * exp
 
   let range_of_exp = function
     | Var (r, _, _)
-    | IConst (r, _)
-    | BConst (r, _)
-    | UConst r
+    | Const (r, _)
     | BinOp (r, _, _, _)
-    | IfExp (r, _, _, _)
-    | FunExp (r, _, _, _)
-    | FixExp (r, _, _, _, _, _)
-    | AppExp (r, _, _)
-    | CastExp (r, _, _, _, _)
-    | LetExp (r, _, _, _, _) -> r
+    | Fun (r, _, _, _, _)
+    | App (r, _, _)
+    | Shift (r, _, _, _)
+    | Reset (r, _, _)
+    | If (r, _, _, _)
+    | Consq (r, _, _)
+    | Cast (r, _, _, _, _)
+    | Pure (r, _, _)
+    | Let (r, _, _, _, _) -> r
 
-  let rec is_value = function
-    | IConst _
-    | BConst _
-    | UConst _
-    | FunExp _
-    | FixExp _-> true
-    | CastExp (_, v, TyFun _, TyFun _, _) when is_value v -> true
-    | CastExp (_, v, g, TyDyn, _) when is_value v && is_ground g -> true
-    | _ -> false
+  let map f_ty f_exp = function
+    | Var _ as e -> e
+    | Const _ as e -> e
+    | BinOp (r, op, e1, e2) -> BinOp (r, op, f_exp e1, f_exp e2)
+    | Fun (r, g, x1, x1_t, e) -> Fun (r, f_ty g, x1, f_ty x1_t, f_exp e)
+    | App (r, e1, e2) -> App (r, f_exp e1, f_exp e2)
+    | Shift (r, k, k_t, e) -> Shift (r, k, f_ty k_t, f_exp e)
+    | Reset (r, e, u) -> Reset (r, f_exp e, f_ty u)
+    | If (r, e1, e2, e3) -> If (r, f_exp e1, f_exp e2, f_exp e3)
+    | Consq (r, e1, e2) -> Consq (r, f_exp e1, f_exp e2)
+    | Cast (r, e, u1, u2, p) -> Cast (r, f_exp e, f_ty u1, f_ty u2, p)
+    | Pure (r, ty, e)  -> Pure (r, f_ty ty, f_exp e)
+    | Let (r, id, xs, e1, e2) -> Let (r, id, xs, f_exp e1, f_exp e2)
 
   let ftv_tyarg = function
     | Ty ty -> ftv_ty ty
     | TyNu -> TV.empty
 
   let rec ftv_exp: exp -> TV.t = function
-    | Var (_, _, us) -> List.fold_right TV.union (List.map ftv_tyarg us) TV.empty
-    | IConst _
-    | BConst _
-    | UConst _ -> TV.empty
-    | BinOp (_, _, f1, f2) -> TV.union (ftv_exp f1) (ftv_exp f2)
-    | IfExp (_, f1, f2, f3) ->
-      List.fold_right TV.union (List.map ftv_exp [f1; f2; f3]) TV.empty
-    | FunExp (_, _, u, e) -> TV.union (ftv_ty u) (ftv_exp e)
-    | FixExp (_, _, _, u1, _, f) -> TV.union (ftv_ty u1) (ftv_exp f)
-    | AppExp (_, f1, f2) -> TV.union (ftv_exp f1) (ftv_exp f2)
-    | CastExp (_, f, u1, u2, _) ->
-      TV.union (ftv_exp f) @@ TV.union (ftv_ty u1) (ftv_ty u2)
-    | LetExp (_, _, xs, f1, f2) ->
-      TV.union (TV.diff (ftv_exp f1) (TV.of_list xs)) (ftv_exp f2)
+    | Var (_, _,us) -> List.fold_right TV.union (List.map ftv_tyarg us) TV.empty
+    | Const _ -> TV.empty
+    | BinOp (_, _, e1, e2) -> TV.union (ftv_exp e1) (ftv_exp e2)
+    | If (_, e1, e2, e3) -> TV.big_union @@ List.map ftv_exp [e1; e2; e3]
+    | Fun (_, _, _, _, e) -> ftv_exp e
+    | App (_, e1, e2) -> TV.union (ftv_exp e1) (ftv_exp e2)
+    | Let (_, _, xs, f1, f2) -> TV.union (TV.diff (ftv_exp f1) (TV.of_list xs)) (ftv_exp f2)
+    | Shift(_, _, _, e) -> ftv_exp e
+    | Reset(_, e, _) -> ftv_exp e
+    | Pure (_, _, e) -> ftv_exp e
+    | Consq (_, e1, e2) -> TV.union (ftv_exp e1) (ftv_exp e2)
+    | Cast (_, e, u1, u2, _) -> TV.union (ftv_exp e) @@ TV.union (ftv_ty u1) (ftv_ty u2)
 
-  type program =
-    | Exp of exp
-    | LetDecl of id * tyvar list * exp
-
-  type tag = I | B | U | Ar
-
-  let tag_to_ty = function
-    | I -> TyInt
-    | B -> TyBool
-    | U -> TyUnit
-    | Ar -> TyFun (TyDyn, TyDyn)
+  type tag = P of int | PP of int | I | B | U | Ar
 
   type value =
     | IntV of int
     | BoolV of bool
     | UnitV
-    | FunV of ((tyvar list * ty list) -> value -> value)
+    | FunV of ((tyvar list * ty list) -> value -> cont -> value)
     | Tagged of tag * value
+  and cont = value -> value
 end

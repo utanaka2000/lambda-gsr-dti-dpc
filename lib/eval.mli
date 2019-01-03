@@ -1,9 +1,8 @@
 open Syntax
-open Syntax.CC
+open Syntax.CSR
 open Utils.Error
 
+exception Eval_fatal_error of string
 exception Blame of range * polarity
 
-exception Eval_bug of string
-
-val eval_program : ?debug:bool -> (tyvar list * value) Environment.t -> program -> (tyvar list * value) Environment.t * id * value
+val eval : bool -> exp -> (tyvar list * value) Environment.t -> cont -> value

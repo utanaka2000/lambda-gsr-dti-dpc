@@ -1,32 +1,58 @@
+open Constraints
 open Format
-
 open Syntax
 
-exception Syntax_error
+let pp_sep ppf () = fprintf ppf ", "
 
-let with_paren flag ppf_e ppf e =
-  fprintf ppf (if flag then "(%a)" else "%a") ppf_e e
+(* binop -> string *)
+let pp_print_binop ppf op =
+  pp_print_string ppf begin
+    match op with
+    | Plus -> "+"
+    | Minus -> "-"
+    | Mult -> "*"
+    | Div -> "/"
+    | Equal -> "="
+    | Gt -> ">"
+    | Lt -> "<"
+  end
 
-let rec gt_ty (u1: ty) u2 = match u1, u2 with
-  | TyVar (_, { contents = Some u1 }), u2
-  | u1, TyVar (_, { contents = Some u2 }) -> gt_ty u1 u2
-  | _, TyFun _ -> true
-  | _ -> false
+let pp_print_basety ppf b =
+  pp_print_string ppf begin
+    match b with
+    | TyBool -> "bool"
+    | TyInt -> "int"
+    | TyUnit -> "unit"
+  end
 
-(** Pretty-printer for types. Show the raw index of a type variable (e.g., 'x123->'x124). *)
-let rec pp_ty ppf = function
+let rec pp_print_type ppf = function
+  | TyPureVar tp -> fprintf ppf "'X%d" tp
+  | TyVar (x, {contents=None}) -> fprintf ppf "'x%d" x
+  | TyVar (_, {contents=Some u}) -> pp_print_type ppf u
+  | TyBase b -> pp_print_basety ppf b
+  | TyFun (t1, t2, t3, t4) ->
+    (* TODO: can be better *)
+    let with_paren ppf t = match t with
+      | TyFun _ -> fprintf ppf "(%a)" pp_print_type t
+      | _ -> fprintf ppf "%a" pp_print_type t
+    in
+    fprintf ppf "%a/%a -> %a/%a"
+      with_paren t1
+      with_paren t2
+      with_paren t3
+      with_paren t4
   | TyDyn -> pp_print_string ppf "?"
-  | TyVar (a, { contents = None }) -> fprintf ppf "'x%d" a
-  | TyVar (_, { contents = Some u }) -> pp_ty ppf u
-  | TyInt -> pp_print_string ppf "int"
-  | TyBool -> pp_print_string ppf "bool"
-  | TyUnit -> pp_print_string ppf "unit"
-  | TyFun (u1, u2) as u ->
-    fprintf ppf "%a -> %a"
-      (with_paren (gt_ty u u1) pp_ty) u1
-      pp_ty u2
 
-(** Pretty-printer for types. Type variables are renamed (e.g., 'a->'b). *)
+let pp_print_var ppf (x, ys) =
+  if List.length ys = 0 then
+    fprintf ppf "%s" x
+  else
+    let pp_sep ppf () = fprintf ppf "," in
+    let pp_list ppf types = pp_print_list pp_print_type ppf types ~pp_sep:pp_sep in
+    fprintf ppf "%s[%a]"
+      x
+      pp_list ys
+
 let pp_ty2 ppf u =
   let tyvars = ref [] in
   let pp_tyvar ppf (a, _) =
@@ -47,161 +73,104 @@ let pp_ty2 ppf u =
     | TyDyn -> pp_print_string ppf "?"
     | TyVar (_, { contents = Some u }) -> pp_ty ppf u
     | TyVar x -> pp_tyvar ppf x
-    | TyInt -> pp_print_string ppf "int"
-    | TyBool -> pp_print_string ppf "bool"
-    | TyUnit -> pp_print_string ppf "unit"
-    | TyFun (u1, u2) as u ->
-      fprintf ppf "%a -> %a"
-        (with_paren (gt_ty u u1) pp_ty) u1
-        pp_ty u2
+    | TyBase b -> pp_print_basety ppf b
+    | TyFun (t1, t2, t3, t4) ->
+      (* TODO: can be better *)
+      let with_paren ppf t = match t with
+        | TyFun _ -> fprintf ppf "(%a)" pp_ty t
+        | _ -> fprintf ppf "%a" pp_ty t
+      in
+      fprintf ppf "%a/%a -> %a/%a"
+        with_paren t1
+        with_paren t2
+        with_paren t3
+        with_paren t4
+    | TyPureVar tp -> fprintf ppf "'X%d" tp
   in pp_ty ppf u
-
-let gt_binop op1 op2 = match op1, op2 with
-  | (Plus | Minus | Mult | Div | Mod), (Eq | Neq | Lt | Lte | Gt | Gte)
-  | (Mult | Div | Mod), (Plus | Minus) -> true
-  | _ -> false
-
-let gte_binop op1 op2 = match op1, op2 with
-  | (Eq | Neq | Lt | Lte | Gt | Gte), (Eq | Neq | Lt | Lte | Gt | Gte)
-  | (Mult | Div | Mod), (Mult | Div | Mod)
-  | (Plus | Minus), (Plus | Minus) -> true
-  | _ -> gt_binop op1 op2
-
-let pp_binop ppf op =
-  pp_print_string ppf begin
-    match op with
-    | Plus -> "+"
-    | Minus -> "-"
-    | Mult -> "*"
-    | Div -> "/"
-    | Mod -> "mod"
-    | Eq -> "="
-    | Neq -> "<>"
-    | Lt -> "<"
-    | Lte -> "<="
-    | Gt -> ">"
-    | Gte -> ">="
-  end
-
-let pp_print_var ppf (x, ys) =
-  if List.length ys = 0 then
-    fprintf ppf "%s" x
-  else
-    let pp_sep ppf () = fprintf ppf "," in
-    let pp_list ppf types = pp_print_list pp_ty ppf types ~pp_sep:pp_sep in
-    fprintf ppf "%s[%a]"
-      x
-      pp_list ys
 
 let pp_let_tyabses ppf tyvars =
   if List.length tyvars = 0 then
     fprintf ppf ""
   else
     let pp_sep ppf () = fprintf ppf "," in
-    let pp_list ppf types = pp_print_list pp_ty ppf types ~pp_sep:pp_sep in
+    let pp_list ppf types = pp_print_list pp_print_type ppf types ~pp_sep:pp_sep in
     fprintf ppf "fun %a -> " pp_list @@ List.map (fun x -> TyVar x) tyvars
 
-module ITGL = struct
-  open Syntax.ITGL
+let pp_print_const ppf = function
+  | ConstBool b -> pp_print_bool ppf b
+  | ConstInt i -> pp_print_int ppf i
+  | ConstUnit -> pp_print_string ppf "()"
 
-  let pp_constr ppf = function
-    | CEqual (u1, u2) ->
-      fprintf ppf "%a =.= %a" pp_ty u1 pp_ty u2
-    | CConsistent (u1, u2) ->
-      fprintf ppf "%a ~.~ %a" pp_ty u1 pp_ty u2
+let pp_print_type_annot ppf (x, t) =
+  fprintf ppf "(%s: %a)" x pp_print_type t
 
-  let gt_exp e1 e2 = match e1, e2 with
-    | (Var _ | IConst _ | BConst _ | UConst _ | AscExp _ | AppExp _ | BinOp _ | IfExp _), (LetExp _ | FunEExp _ | FunIExp _ | FixEExp _ | FixIExp _) -> true
-    | (Var _ | IConst _ | BConst _ | UConst _ | AscExp _ | AppExp _ | BinOp _), IfExp _ -> true
-    | BinOp (_, op1, _, _), BinOp (_, op2, _, _) -> gt_binop op1 op2
-    | (Var _ | IConst _ | BConst _ | UConst _ | AscExp _ | AppExp _), BinOp _ -> true
-    | (Var _ | IConst _ | BConst _ | UConst _ | AscExp _), AppExp _ -> true
-    | _ -> false
+let pp_print_answer_type_annot ppf t =
+  fprintf ppf "^%a" pp_print_type t
 
-  let gte_exp e1 e2 = match e1, e2 with
-    | LetExp _, LetExp _ -> true
-    | FunEExp _, FunEExp _ -> true
-    | FunIExp _, FunIExp _ -> true
-    | FixEExp _, FixEExp _ -> true
-    | FixIExp _, FixIExp _ -> true
-    | IfExp _, IfExp _ -> true
-    | BinOp (_, op1, _, _), BinOp (_, op2, _, _) when op1 = op2 -> true
-    | AppExp _, AppExp _ -> true
-    | _ -> gt_exp e1 e2
+let pp_print_constr ppf = function
+  | CEqual (u1, u2) -> fprintf ppf "%a=%a" pp_print_type u1 pp_print_type u2
+  | CConsistent (u1, u2) -> fprintf ppf "%a~%a" pp_print_type u1 pp_print_type u2
 
-  let rec pp_exp ppf = function
-    | Var (_, x, ys) -> pp_print_var ppf (x, !ys)
-    | BConst (_, b) -> pp_print_bool ppf b
-    | IConst (_, i) -> pp_print_int ppf i
-    | UConst _ -> pp_print_string ppf "()"
-    | BinOp (_, op, e1, e2) as e ->
+let pp_print_constraints ppf c =
+  pp_print_list pp_print_constr ppf (Constraints.to_list c) ~pp_sep:pp_sep
+
+let pp_print_subst ppf ((x, _), t) =
+  fprintf ppf "x%a=%a" pp_print_int x pp_print_type t
+
+let pp_print_substitutions ppf s =
+  pp_print_list pp_print_subst ppf s ~pp_sep:pp_sep
+
+module GSR = struct
+  open GSR
+
+  let rec pp_print_exp ppf = function
+    | Var (_, x,ys) -> pp_print_var ppf (x, !ys)
+    | Const (_, c) -> pp_print_const ppf c
+    | BinOp (_, op, e1, e2) ->
       fprintf ppf "%a %a %a"
-        (with_paren (gt_exp e e1) pp_exp) e1
-        pp_binop op
-        (with_paren (gt_exp e e2) pp_exp) e2
-    | AscExp (_, e, u) ->
-      fprintf ppf "(%a : %a)"
-        pp_exp e
-        pp_ty u
-    | IfExp (_, e1, e2, e3) as e ->
+        pp_print_exp e1
+        pp_print_binop op
+        pp_print_exp e2
+    | Fun (_, g, x, x_t, e) ->
+      fprintf ppf "fun%a %a -> %a"
+        pp_print_answer_type_annot g
+        pp_print_type_annot (x, x_t)
+        pp_print_exp e
+    | App (_, e1, e2) ->
+      fprintf ppf "((%a) (%a))"
+        pp_print_exp e1
+        pp_print_exp e2
+    | Shift (_, k, k_t, e) ->
+      fprintf ppf "shift %a -> (%a)"
+        pp_print_type_annot (k, k_t)
+        pp_print_exp e
+    | Reset (_, e, u) ->
+      fprintf ppf "reset%a (%a)"
+        pp_print_answer_type_annot u
+        pp_print_exp e
+    | If (_, e1, e2, e3) ->
       fprintf ppf "if %a then %a else %a"
-        (with_paren (gt_exp e e1) pp_exp) e1
-        (with_paren (gt_exp e e2) pp_exp) e2
-        (with_paren (gt_exp e e3) pp_exp) e3
-    | FunEExp (_, x1, u1, e)
-    | FunIExp (_, x1, u1, e) ->
-      fprintf ppf "fun (%s: %a) -> %a"
-        x1
-        pp_ty u1
-        pp_exp e
-    | FixEExp (_, x, y, u1, u2, e)
-    | FixIExp (_, x, y, u1, u2, e) ->
-      fprintf ppf "fix %s (%s: %a): %a = %a"
-        x
-        y
-        pp_ty u1
-        pp_ty u2
-        pp_exp e
-    | AppExp (_, e1, e2) as e ->
-      fprintf ppf "%a %a"
-        (with_paren (gt_exp e e1) pp_exp) e1
-        (with_paren (gte_exp e e2) pp_exp) e2
-    | LetExp (_, x, e1, e2) as e ->
+        pp_print_exp e1
+        pp_print_exp e2
+        pp_print_exp e3
+    | Consq (_, e1, e2) ->
+      fprintf ppf "%a; %a"
+        pp_print_exp e1
+        pp_print_exp e2
+    | Pure (_, e) ->
+      fprintf ppf "pure( %a )"
+        pp_print_exp e
+    | Let (_, id, e1, e2) ->
       fprintf ppf "let %s = %a in %a"
-        x
-        (with_paren (gt_exp e e1) pp_exp) e1
-        (with_paren (gte_exp e e2) pp_exp) e2
-
-  let pp_program ppf = function
-    | Exp e -> pp_exp ppf e
-    | LetDecl (x, e) ->
-      fprintf ppf "let %s = %a"
-        x
-        pp_exp e
+        id
+        pp_print_exp e1
+        pp_print_exp e2
 end
 
-module CC = struct
-  open Syntax.CC
-
-  let gt_exp f1 f2 = match f1, f2 with
-    | (Var _ | IConst _ | BConst _ | UConst _ | AppExp _ | BinOp _ | IfExp _ | CastExp _), (LetExp _ | FunExp _ | FixExp _) -> true
-    | (Var _ | IConst _ | BConst _ | UConst _ | AppExp _ | BinOp _ | IfExp _), CastExp _ -> true
-    | (Var _ | IConst _ | BConst _ | UConst _ | AppExp _ | BinOp _), IfExp _ -> true
-    | BinOp (_, op1, _, _), BinOp (_, op2, _, _) -> gt_binop op1 op2
-    | (Var _ | IConst _ | BConst _ | UConst _ | AppExp _), BinOp _ -> true
-    | (Var _ | IConst _ | BConst _ | UConst _), AppExp _ -> true
-    | _ -> false
-
-  let gte_exp f1 f2 = match f1, f2 with
-    | (LetExp _ | FunExp _ | FixExp _), (LetExp _ | FunExp _ | FixExp _) -> true
-    | IfExp _, IfExp _ -> true
-    | BinOp (_, op1, _, _), BinOp (_, op2, _, _) when op1 = op2 -> true
-    | AppExp _, AppExp _ -> true
-    | CastExp _, CastExp _ -> true
-    | _ -> gt_exp f1 f2
-
+module CSR = struct
+  open CSR
   let pp_tyarg ppf = function
-    | Ty u -> pp_ty ppf u
+    | Ty u -> pp_print_type ppf u
     | TyNu -> pp_print_string ppf "ν"
 
   let pp_print_var ppf (x, ys) =
@@ -214,75 +183,68 @@ module CC = struct
         x
         pp_list ys
 
-  let rec pp_exp ppf = function
-    | Var (_, x, ys) -> pp_print_var ppf (x, ys)
-    | BConst (_, b) -> pp_print_bool ppf b
-    | IConst (_, i) -> pp_print_int ppf i
-    | UConst _ -> pp_print_string ppf "()"
-    | BinOp (_, op, f1, f2) as f ->
+  (* TODO print correctly *)
+  let rec pp_print_exp ppf = function
+    | Var (_, x, ys) -> pp_print_var ppf (x,ys)
+    | Const (_, c) -> pp_print_const ppf c
+    | BinOp (_, op, e1, e2) ->
       fprintf ppf "%a %a %a"
-        (with_paren (gt_exp f f1) pp_exp) f1
-        pp_binop op
-        (with_paren (gt_exp f f2) pp_exp) f2
-    | IfExp (_, f1, f2, f3) as f ->
+        pp_print_exp e1
+        pp_print_binop op
+        pp_print_exp e2
+    | Fun (_, g, x, x_t, e) ->
+      fprintf ppf "fun%a %a -> %a"
+        pp_print_answer_type_annot g
+        pp_print_type_annot (x, x_t)
+        pp_print_exp e
+    | App (_, e1, e2) ->
+      fprintf ppf "((%a) (%a))"
+        pp_print_exp e1
+        pp_print_exp e2
+    | Shift (_, k, k_t, e) ->
+      fprintf ppf "shift %a -> (%a)"
+        pp_print_type_annot (k, k_t)
+        pp_print_exp e
+    | Reset (_, e, u) ->
+      fprintf ppf "reset%a (%a)"
+        pp_print_answer_type_annot u
+        pp_print_exp e
+    | If (_, e1, e2, e3) ->
       fprintf ppf "if %a then %a else %a"
-        (with_paren (gt_exp f f1) pp_exp) f1
-        (with_paren (gt_exp f f2) pp_exp) f2
-        (with_paren (gt_exp f f3) pp_exp) f3
-    | FunExp (_, x1, u1, f) ->
-      fprintf ppf "fun (%s: %a) -> %a"
-        x1
-        pp_ty u1
-        pp_exp f
-    | FixExp (_, x, y, u1, u2, f) ->
-      fprintf ppf "fix %s (%s: %a): %a = %a"
-        x
-        y
-        pp_ty u1
-        pp_ty u2
-        pp_exp f
-    | AppExp (_, f1, f2) as f ->
-      fprintf ppf "%a %a"
-        (with_paren (gt_exp f f1) pp_exp) f1
-        (with_paren (gte_exp f f2) pp_exp) f2
-    | CastExp (_, f1, u1, u2, _) as f ->
-      begin match f1 with
-      | CastExp (_, _, _, u1', _) when u1 = u1' ->
-        fprintf ppf "%a => %a"
-          (with_paren (gt_exp f f1) pp_exp) f1
-          pp_ty u2
-      | CastExp _ ->
-        raise Syntax_error
-      | _ ->
-        fprintf ppf "%a: %a => %a"
-          (with_paren (gt_exp f f1) pp_exp) f1
-          pp_ty u1
-          pp_ty u2
-      end
-    | LetExp (_, x, xs, f1, f2) as f ->
+        pp_print_exp e1
+        pp_print_exp e2
+        pp_print_exp e3
+    | Consq (_, e1, e2) ->
+      fprintf ppf "%a; %a"
+        pp_print_exp e1
+        pp_print_exp e2
+    | Cast (_, e, u1, u2, _) ->
+      fprintf ppf "(%a : %a => %a)"
+        pp_print_exp e
+        pp_print_type u1
+        pp_print_type u2
+    | Pure (_, _, e) ->
+      fprintf ppf "pure( %a )"
+        pp_print_exp e
+    | Let (_, id, xs, e1, e2) ->
       fprintf ppf "let %s = %a%a in %a"
-        x
+        id
         pp_let_tyabses xs
-        (with_paren (gt_exp f f1) pp_exp) f1
-        (with_paren (gte_exp f f2) pp_exp) f2
+        pp_print_exp e1
+        pp_print_exp e2
 
-  let pp_program ppf = function
-    | Exp e -> pp_exp ppf e
-    | LetDecl (x, xs, f) ->
-      fprintf ppf "let %s = %a%a"
-        x
-        pp_let_tyabses xs
-        pp_exp f
+  let pp_print_tag ppf = function
+    | P p -> fprintf ppf "'x%d" p
+    | PP p -> fprintf ppf "'X%d" p
+    | B -> pp_print_string ppf "bool"
+    | I -> pp_print_string ppf "int"
+    | U -> pp_print_string ppf "unit"
+    | Ar -> pp_print_string ppf "?/? -> ?/?"
 
-  let pp_tag ppf t = pp_ty ppf @@ tag_to_ty t
-
-  let rec pp_value ppf = function
-    | BoolV b -> pp_print_bool ppf b
+  let rec pp_print_value ppf = function
     | IntV i -> pp_print_int ppf i
+    | BoolV b -> pp_print_bool ppf b
     | UnitV -> pp_print_string ppf "()"
     | FunV _ -> pp_print_string ppf "<fun>"
-    | Tagged (t, v) ->
-      fprintf ppf "%a: %a => ?"
-        pp_value v
-        pp_tag t
+    | Tagged (t, v) -> fprintf ppf "%a : %a => ?" pp_print_value v pp_print_tag t
 end

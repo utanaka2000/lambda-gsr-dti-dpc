@@ -1,530 +1,571 @@
-open Format
-
-open Pp
+open Constraints
 open Syntax
 
-exception Type_error of string
-(* Bug in this implementation *)
-exception Type_bug of string
+(* Fatal errors *)
+exception Type_fatal_error of string
 
-let fresh_tyvar =
+(* Soft errors *)
+exception Type_error of string
+exception Type_error1 of
+    ((Format.formatter -> ty -> unit) -> ty -> unit, Format.formatter, unit) Pervasives.format
+    * ty
+exception Type_error2 of
+    ((Format.formatter -> ty -> unit) -> ty -> (Format.formatter -> ty -> unit) -> ty -> unit, Format.formatter, unit) Pervasives.format
+    * ty * ty
+exception Unification_error of
+    ((Format.formatter -> constr -> unit) -> constr -> unit, Format.formatter, unit) Pervasives.format
+    * constr
+
+(* Utilities *)
+
+let is_tyvar = function TyVar _ -> true | _ -> false
+
+(* ty -> bool *)
+let rec is_static_type = function
+  | TyFun (t1, t2, t3, t4) -> (is_static_type t1) && (is_static_type t2) && (is_static_type t3) && (is_static_type t4)
+  | TyDyn -> false
+  | _ -> true
+
+(* ty list -> bool *)
+let is_static_types types = List.fold_left (&&) true @@ List.map is_static_type types
+
+let domf = function
+  | TyFun (u, _, _, _) -> u
+  | TyDyn -> TyDyn
+  | _ -> raise @@ Type_fatal_error "domf: failed to match"
+
+let codc = function
+  | TyFun (_, u, _, _) -> u
+  | TyDyn -> TyDyn
+  | _ -> raise @@ Type_fatal_error "codc: failed to match"
+
+let domc = function
+  | TyFun (_, _, u, _) -> u
+  | TyDyn -> TyDyn
+  | _ -> raise @@ Type_fatal_error "domc: failed to match"
+
+let codf = function
+  | TyFun (_, _, _, u) -> u
+  | TyDyn -> TyDyn
+  | _ -> raise @@ Type_fatal_error "codf: failed to match"
+
+let rec meet u1 u2 = match u1, u2 with
+  | u1, u2 when u1 = u2 -> u1
+  | u, TyDyn | TyDyn, u -> u
+  | TyFun (u11, u12, u13, u14), TyFun (u21, u22, u23, u24) ->
+    TyFun (meet u11 u21, meet u12 u22, meet u13 u23, meet u14 u24)
+  | _ -> raise @@ Type_fatal_error "meet: failed to match"
+
+let rec is_consistent u1 u2 = match u1, u2 with
+  | TyVar (p1, _), TyVar (p2, _) when p1 = p2 -> true
+  | TyBase b1, TyBase b2 when b1 = b2 -> true
+  | _, TyDyn
+  | TyDyn, _ -> true
+  | TyFun (u11, u12, u13, u14), TyFun (u21, u22, u23, u24) ->
+    is_consistent u11 u21 &&
+    is_consistent u12 u22 &&
+    is_consistent u13 u23 &&
+    is_consistent u14 u24
+  | _ -> false
+
+(* Base type or type variables *)
+let is_bvp_type = function
+  | TyBase _ -> true
+  | TyVar _ -> true
+  | _ -> false
+
+let type_of_const c = TyBase (match c with
+    | ConstBool _ -> TyBool
+    | ConstInt _ -> TyInt
+    | ConstUnit -> TyUnit
+  )
+
+let type_of_binop = function
+  | Plus | Minus | Mult | Div -> TyBase TyInt, TyBase TyInt, TyBase TyInt
+  | Equal | Gt | Lt -> TyBase TyInt, TyBase TyInt, TyBase TyBool
+
+let fresh_var =
   let counter = ref 0 in
   let body () =
     let v = !counter in
     counter := v + 1;
-    TyVar (!counter, ref None)
+    "!k" ^ string_of_int @@ v + 1
   in body
 
-(* These functions only can be used for normalized types *)
-let dom = function
-  | TyVar (_, { contents = Some _ }) ->
-    raise @@ Type_bug "dom: instantiated tyvar is given"
-  | TyFun (u1, _) -> u1
-  | TyDyn -> TyDyn
-  | _ as u ->
-    raise @@ Type_error (asprintf "failed to match: dom(%a)" pp_ty u)
-
-let cod = function
-  | TyVar (_, { contents = Some _ }) ->
-    raise @@ Type_bug "cod: instantiated tyvar is given"
-  | TyFun (_, u2) -> u2
-  | TyDyn -> TyDyn
-  | _ as u ->
-    raise @@ Type_error (asprintf "failed to match: cod(%a)" pp_ty u)
-
-let rec meet u1 u2 = match u1, u2 with
-  | TyVar (_, { contents = Some _ }), _
-  | _, TyVar (_, { contents = Some _ }) ->
-    raise @@ Type_bug "meet: instantiated tyvar is given"
-  | TyBool, TyBool -> TyBool
-  | TyInt, TyInt -> TyInt
-  | TyUnit, TyUnit -> TyUnit
-  | TyVar (a1, _ as x1), TyVar (a2, _) when a1 = a2 -> TyVar x1
-  | TyDyn, u | u, TyDyn -> u
-  | TyFun (u11, u12), TyFun (u21, u22) -> TyFun (meet u11 u21, meet u12 u22)
-  | _ ->
-    raise @@ Type_error (asprintf "failed to match: meet(%a, %a)" pp_ty u1 pp_ty u2)
-
-let type_of_binop = function
-  | Plus | Minus | Mult | Div | Mod -> TyInt, TyInt, TyInt
-  | Eq | Neq | Lt | Lte | Gt | Gte -> TyInt, TyInt, TyBool
-
-let rec is_static_type = function
-  | TyVar (_, { contents = Some u }) -> is_static_type u
-  | TyFun (u1, u2) -> (is_static_type u1) && (is_static_type u2)
-  | TyDyn -> false
-  | _ -> true
-
-let rec is_bv_type = function
-  | TyBool
-  | TyInt
-  | TyUnit
-  | TyVar (_, { contents = None }) -> true
-  | TyVar (_, { contents = Some u }) -> is_bv_type u
-  | _ -> false
-
-let rec is_base_type = function
-  | TyBool | TyInt | TyUnit -> true
-  | TyVar (_, { contents = Some u }) -> is_base_type u
-  | _ -> false
-
-let rec is_tyvar = function
-  | TyVar (_, { contents = None }) -> true
-  | TyVar (_, { contents = Some u }) -> is_tyvar u
-  | _ -> false
-
-let rec is_equal u1 u2 = match u1, u2 with
-  | TyVar (_, { contents = Some u1 }), u2
-  | u1, TyVar (_, { contents = Some u2 }) -> is_equal u1 u2
-  | TyDyn, TyDyn
-  | TyBool, TyBool
-  | TyInt, TyInt
-  | TyUnit, TyUnit -> true
-  | TyVar (a1, _), TyVar (a2, _) when a1 = a2 -> true
-  | TyFun (u11, u12), TyFun (u21, u22) ->
-    (is_equal u11 u21) && (is_equal u12 u22)
-  | _ -> false
-
-let rec is_consistent u1 u2 = match u1, u2 with
-  | TyVar (_, { contents = Some u1 }), u2
-  | u1, TyVar (_, { contents = Some u2 }) ->
-    is_consistent u1 u2
-  | TyDyn, TyDyn
-  | TyBool, TyBool
-  | TyInt, TyInt
-  | TyUnit, TyUnit
-  | _, TyDyn
-  | TyDyn, _ -> true
-  | TyVar (a1, _), TyVar (a2, _) when a1 = a2 -> true
-  | TyFun (u11, u12), TyFun (u21, u22) ->
-    (is_consistent u11 u21) && (is_consistent u12 u22)
-  | _ -> false
-
-(* Substitutions for type variables *)
+(* Substitutions for constraints *)
 
 type substitution = tyvar * ty
 type substitutions = substitution list
 
+(* [x:=t]u *)
+let rec subst_type (x : tyvar) (t : ty) = function
+  | TyFun (u1, u2, u3, u4) -> TyFun (subst_type x t u1, subst_type x t u2, subst_type x t u3, subst_type x t u4)
+  | TyVar (x', _) as u -> begin match x with (i, _) -> if x'=i then t else u end
+  | _ as u -> u
+
+(* [x:=t]e *)
+let rec subst_exp x t e = GSR.map (subst_type x t) (subst_exp x t) e
+
+(* [x:=t]c *)
+let subst_constraint x t = function
+  | CEqual (u1, u2) -> CEqual (subst_type x t u1, subst_type x t u2)
+  | CConsistent (u1, u2) -> CConsistent (subst_type x t u1, subst_type x t u2)
+
+(* [x:=t]C *)
+let subst_constraints x t (c : constr list) =
+  (* TODO: OK? *)
+  List.map (subst_constraint x t) c
+
 (* S(t) *)
-let subst_type (s: (tyvar * ty) list) (u: ty) =
+let subst_type_substitutions (t : ty) (s : substitutions) =
+  List.fold_left (fun u -> fun (x, t) -> subst_type x t u) t s
+
+(* S(e) *)
+let subst_exp_substitutions e (s : substitutions) =
+  List.fold_left (fun e -> fun (x, t) -> subst_exp x t e) e s
+
+(* let subst_env_substitutions env s =
+   Environment.map @@ fun (TyScheme (xs, u)) -> TyScheme (subst_type2 , subst_type u) *)
+(* *)
+
+
+(* substitution for var argument *)
+let subst_type2 (s: (tyvar * ty) list) (u: ty) =
   (* {X':->U'}(U) *)
   let rec subst u ((a', _), u' as s0) = match u with
-    | TyFun (u1, u2) -> TyFun (subst u1 s0, subst u2 s0)
+    | TyFun (u1, u2, u3, u4) -> TyFun (subst u1 s0, subst u2 s0, subst u3 s0, subst u4 s0)
     | TyVar (a, { contents = None }) when a = a' -> u'
     | TyVar (_, { contents = Some u }) -> subst u s0
     | _ as u -> u
   in
   List.fold_left subst u s
 
-(* When you're sure that this tyarg does not contain ν
- * you can convert it to ty *)
-let tyarg_to_ty = function
-  | CC.Ty u -> u
-  | CC.TyNu -> raise @@ Type_bug "failed to cast tyarg to ty"
+module GSR = struct
+  open Syntax.GSR
 
-module ITGL = struct
-  open Pp.ITGL
-  open Syntax.ITGL
+  let is_pure = function
+    | Var _ -> true
+    | Const _ -> true
+    | Fun _  -> true
+    | Reset _ -> true
+    | Pure _ -> true
+    | _ -> false
 
-  (* Unification *)
+  let fresh_tyvar =
+    let counter = ref 0 in
+    let body () =
+      let v = !counter in
+      counter := v + 1;
+      TyVar (v + 1, {contents = None})
+    in body
 
-  let rec unify = function
-    (* When tyvar is already instantiated *)
-    | CConsistent (TyVar (_, { contents = Some u1 }), u2)
-    | CConsistent (u1, TyVar (_, { contents = Some u2 })) ->
-      unify @@ CConsistent (u1, u2)
-    (* iota ~ iota *)
-    | CConsistent (u1, u2) when u1 = u2 && is_base_type u1 -> ()
-    (* X ~ X *)
-    | CConsistent (TyVar (a1, _), TyVar (a2, _)) when a1 = a2 -> ()
-    (* ? ~ U or U ~ ? *)
-    | CConsistent (TyDyn, _) | CConsistent (_, TyDyn) -> ()
-    (* U11->U12 ~ U21->U22 *)
-    | CConsistent (TyFun (u11, u12), TyFun (u21, u22)) ->
-      unify @@ CConsistent (u11, u21);
-      unify @@ CConsistent (u12, u22)
-    (* U ~ X *)
-    | CConsistent (u, TyVar x) when not (is_tyvar u) ->
-      unify @@ CConsistent (TyVar x, u)
-    (* X ~ U *)
-    | CConsistent (TyVar x, u) when is_bv_type u ->
-      unify @@ CEqual (TyVar x, u)
-    (* X ~ U1->U2 *)
-    | CConsistent (TyVar x, TyFun (u1, u2)) when not @@ TV.mem x (ftv_ty (TyFun (u1, u2))) ->
-      let x1, x2 = fresh_tyvar (), fresh_tyvar () in
-      unify @@ CEqual (TyVar x, TyFun (x1, x2));
-      unify @@ CConsistent (x1, u1);
-      unify @@ CConsistent (x2, u2)
-    (* When tyvar is already instantiated *)
-    | CEqual (TyVar (_, { contents = Some u1 }), u2)
-    | CEqual (u1, TyVar (_, { contents = Some u2 })) ->
-      unify @@ CEqual (u1, u2)
-    (* CEqual can be used only for static types *)
-    | CEqual (u1, u2) as c when not (is_static_type u1 && is_static_type u2) ->
-      raise @@ Type_bug (asprintf "invalid constraint: %a" pp_constr c)
-    (* iota = iota *)
-    | CEqual (t1, t2) when t1 = t2 && is_base_type t1 -> ()
-    (* X = X *)
-    | CEqual (TyVar (a1, _), TyVar (a2, _)) when a1 = a2 -> ()
-    (* T11->T12 = T21->T22 *)
-    | CEqual (TyFun (t11, t12), TyFun (t21, t22)) ->
-      unify @@ CEqual (t11, t21);
-      unify @@ CEqual (t12, t22)
-    (* T = X *)
-    | CEqual (t, TyVar x) when not (is_tyvar t) ->
-      unify @@ CEqual (TyVar x, t)
-    (* X = T *)
-    | CEqual (TyVar (a, x), t) when not (TV.mem (a, x) (ftv_ty t)) ->
-      x := Some t
-    | _ as c ->
-      raise @@ Type_error (asprintf "cannot solve a constraint: %a" pp_constr c)
+  (* Type Inference *)
 
-  (* Utility for type inference *)
+  (* domf = *)
+  let generate_constraints_domf_eq = function
+    | TyVar x ->
+      let x1, x2, x3, x4 = fresh_tyvar (), fresh_tyvar (), fresh_tyvar (), fresh_tyvar () in
+      x1, Constraints.singleton @@ CEqual ((TyVar x), (TyFun (x1, x2, x3, x4)))
+    | TyFun (u1, _, _, _) -> u1, Constraints.empty
+    | TyDyn -> TyDyn, Constraints.empty
+    | _ as u -> raise @@ Type_error1 ("failed to generate constraints: domf(%a) is undefined", u)
 
-  let rec type_of_cod_eq = function
-    | TyVar (_, { contents = Some u }) -> type_of_cod_eq u
-    | TyVar (_, { contents = None }) as u ->
-      let x1, x2 = fresh_tyvar (), fresh_tyvar () in
-      unify @@ CEqual (u, (TyFun (x1, x2)));
-      x2
-    | TyFun (_, u2) -> u2
-    | TyDyn -> TyDyn
-    | _ as u ->
-      raise @@ Type_error (
-        asprintf "failed to generate constraints: cod(%a)" pp_ty u
-      )
+  (* domc = *)
+  let generate_constraints_domc_eq = function
+    | TyVar x ->
+      let x1, x2, x3, x4 = fresh_tyvar (), fresh_tyvar (), fresh_tyvar (), fresh_tyvar () in
+      x3, Constraints.singleton @@ CEqual ((TyVar x), (TyFun (x1, x2, x3, x4)))
+    | TyFun (_, _, u3, _) -> u3, Constraints.empty
+    | TyDyn -> TyDyn, Constraints.empty
+    | _ as u -> raise @@ Type_error1 ("failed to generate constraints: domc(%a) is undefined", u)
 
-  let rec type_of_dom_con u1 u2 = match u1, u2 with
-    | TyVar (_, { contents = Some u1 }), u2
-    | u1, TyVar (_, { contents = Some u2 }) ->
-      type_of_dom_con u1 u2
-    | TyVar (_, { contents = None }) as u, u2 ->
-      let x1, x2 = fresh_tyvar (), fresh_tyvar () in
-      unify @@ CEqual (u, (TyFun (x1, x2)));
-      unify @@ CConsistent (x1, u2)
-    | TyFun (u11, _), u2 ->
-      unify @@ CConsistent (u11, u2)
-    | TyDyn, u2 ->
-      unify @@ CConsistent (u1, u2)
-    | u1, u2 ->
-      raise @@ Type_error (
-        asprintf "failed to generate constraints: dom(%a) ~ %a" pp_ty u1 pp_ty u2
-      )
+  (* codc = *)
+  let generate_constraints_codc_eq = function
+    | TyVar x ->
+      let x1, x2, x3, x4 = fresh_tyvar (), fresh_tyvar (), fresh_tyvar (), fresh_tyvar () in
+      x2, Constraints.singleton @@ CEqual ((TyVar x), (TyFun (x1, x2, x3, x4)))
+    | TyFun (_, u2, _, _) -> u2, Constraints.empty
+    | TyDyn -> TyDyn, Constraints.empty
+    | _ as u -> raise @@ Type_error1 ("failed to generate constraints: codc(%a) is undefined", u)
 
-  let rec type_of_meet u1 u2 = match u1, u2 with
-    | TyVar (_, { contents = Some u1 }), u2
-    | u1, TyVar (_, { contents = Some u2 }) ->
-      type_of_meet u1 u2
-    | TyBool, TyBool -> TyBool
-    | TyInt, TyInt -> TyInt
-    | TyUnit, TyUnit -> TyUnit
-    | TyDyn, u
-    | u, TyDyn ->
-      unify @@ CConsistent (u, TyDyn);
-      u
-    | TyVar x, u
-    | u, TyVar x ->
-      unify @@ CConsistent (u, TyVar x);
-      TyVar x
-    | TyFun (u11, u12), TyFun (u21, u22) ->
-      let u1 = type_of_meet u11 u21 in
-      let u2 = type_of_meet u12 u22 in
-      TyFun (u1, u2)
-    | u1, u2 -> raise @@ Type_error (
-        asprintf "failed to generate constraints: meet(%a, %a)"
-          pp_ty u1 pp_ty u2
-      )
+  (* codf = *)
+  let generate_constraints_codf_eq = function
+    | TyVar x ->
+      let x1, x2, x3, x4 = fresh_tyvar (), fresh_tyvar (), fresh_tyvar (), fresh_tyvar () in
+      x4, Constraints.singleton @@ CEqual ((TyVar x), (TyFun (x1, x2, x3, x4)))
+    | TyFun (_, _, _, u4) -> u4, Constraints.empty
+    | TyDyn -> TyDyn, Constraints.empty
+    | _ as u -> raise @@ Type_error1 ("failed to generate constraints: codf(%a) is undefined", u)
+
+  (* domf ~ *)
+  let generate_constraints_domf_con u1 u2 = match u1 with
+    | TyVar x ->
+      let x1, x2, x3, x4 = fresh_tyvar (), fresh_tyvar (), fresh_tyvar (), fresh_tyvar () in
+      let c = Constraints.singleton @@ CEqual ((TyVar x), (TyFun (x1, x2, x3, x4))) in
+      Constraints.add (CConsistent (x1, u2)) c
+    | TyFun (u11, _, _, _) ->
+      Constraints.singleton @@ CConsistent (u11, u2)
+    | TyDyn -> Constraints.singleton @@ CConsistent (u1, u2)
+    | _ as u -> raise @@ Type_error1 ("failed to generate constraints: domf(%a) is undefined", u)
+
+  (* codf ~ *)
+  let generate_constraints_codf_con u1 u2 = match u1 with
+    | TyVar x ->
+      let x1, x2, x3, x4 = fresh_tyvar (), fresh_tyvar (), fresh_tyvar (), fresh_tyvar () in
+      let c = Constraints.singleton @@ CEqual ((TyVar x), (TyFun (x1, x2, x3, x4))) in
+      Constraints.add (CConsistent (x4, u2)) c
+    | TyFun (_, _, _, u14) ->
+      Constraints.singleton @@ CConsistent (u14, u2)
+    | TyDyn -> Constraints.singleton @@ CConsistent (u1, u2)
+    | _ as u -> raise @@ Type_error1 ("failed to generate constraints: codf(%a) is undefined", u)
+
+  let rec generate_constraints_meet u1 u2 = match u1, u2 with
+    | TyBase b1, TyBase b2 when b1 = b2 -> TyBase b1, Constraints.empty
+    | _, TyDyn -> u1, Constraints.singleton @@ CConsistent (u1, TyDyn)
+    | TyDyn, _ -> u2, Constraints.singleton @@ CConsistent (TyDyn, u2)
+    | TyVar _, _ -> u1, Constraints.singleton @@ CConsistent (u1, u2)
+    | _, TyVar _ -> u2, Constraints.singleton @@ CConsistent (u1, u2)
+    | TyFun (u11, u12, u13, u14), TyFun (u21, u22, u23, u24) ->
+      let u1, c1 = generate_constraints_meet u11 u21 in
+      let u2, c2 = generate_constraints_meet u12 u22 in
+      let u3, c3 = generate_constraints_meet u13 u23 in
+      let u4, c4 = generate_constraints_meet u14 u24 in
+      let c = Constraints.union c1 c2 in
+      let c = Constraints.union c c3 in
+      let c = Constraints.union c c4 in
+      TyFun (u1, u2, u3, u4), c
+    | _ -> raise @@ Type_error2 ("failed to generate constraints: meet(%a, %a) is undefined", u1, u2)
+
+  let unify constraints : substitutions =
+    let rec unify c =
+      match c with
+      | [] -> []
+      | constr :: c -> begin
+          match constr with
+          | CConsistent (u1, u2) when u1 = u2 && is_bvp_type u1 ->
+            unify c
+          | CConsistent (TyDyn, _)
+          | CConsistent (_, TyDyn) ->
+            unify c
+          | CConsistent (TyFun (u11, u12, u13, u14), TyFun (u21, u22, u23, u24)) ->
+            unify @@ CConsistent (u11, u21) :: CConsistent (u12, u22) :: CConsistent (u13, u23) :: CConsistent (u14, u24) :: c
+          | CConsistent (u, TyVar x) when not @@ is_tyvar u ->
+            unify @@ CConsistent (TyVar x, u) :: c
+          | CConsistent (TyVar x, u) when is_bvp_type u ->
+            unify @@ CEqual (TyVar x, u) :: c
+          | CConsistent (TyVar x, TyFun (u1, u2, u3, u4)) when not @@ TV.mem x (ftv_ty (TyFun (u1, u2, u3, u4))) ->
+            let x1, x2, x3, x4 = fresh_tyvar (), fresh_tyvar (), fresh_tyvar (), fresh_tyvar () in
+            unify @@ CEqual (TyVar x, TyFun (x1, x2, x3, x4)) :: CConsistent (x1, u1) :: CConsistent (x2, u2) :: CConsistent (x3, u3) :: CConsistent (x4, u4) :: c
+          | CEqual (t1, t2) when t1 = t2 && is_static_type t1 && is_bvp_type t1 ->
+            unify c
+          | CEqual (TyFun (t11, t12, t13, t14), TyFun (t21, t22, t23, t24)) when is_static_types [t11; t12; t13; t14; t21; t22; t23; t24] ->
+            unify @@ CEqual (t11, t21) :: CEqual (t12, t22) :: CEqual (t13, t23) :: CEqual (t14, t24) :: c
+          | CEqual (t, TyVar x) when is_static_type t && not (is_tyvar t) ->
+            unify @@ CEqual (TyVar x, t) :: c
+          | CEqual (TyVar x, t) when not @@ TV.mem x (ftv_ty t) ->
+            let s = unify @@ subst_constraints x t c in
+            (x, t) :: s
+
+          | CEqual (TyDyn,TyDyn) -> unify c (*add*)
+          | CEqual (TyDyn,TyVar x) -> unify @@ CEqual(TyVar x,TyDyn)::c
+          | CEqual (TyVar x,TyDyn) ->
+            let s = unify @@ subst_constraints x TyDyn c in
+            (x, TyDyn) :: s
+          | CEqual (TyFun (t11, t12, t13, t14), TyFun (t21, t22, t23, t24)) ->
+            unify @@ CEqual (t11, t21) :: CEqual (t12, t22) :: CEqual (t13, t23) :: CEqual (t14, t24) :: c
+          | _ ->
+            raise @@ Unification_error ("cannot unify: %a", constr)
+        end
+    in
+    unify @@ Constraints.to_list constraints
 
   (* Utility functions for let polymorpism *)
 
   let closure_tyvars1 u1 env v1 =
     TV.elements @@ TV.diff (ftv_ty u1) @@ TV.union (ftv_tyenv env) (ftv_exp v1)
 
-  let closure_tyvars_let_decl e u1 env =
-    TV.elements @@ TV.diff (TV.union (tv_exp e) (ftv_ty u1)) (ftv_tyenv env)
+  (* let closure_tyvars_let_decl e u1 env =
+    TV.elements @@ TV.diff (TV.union (tv_exp e) (ftv_ty u1)) (ftv_tyenv env) *)
 
   let closure_tyvars2 w1 env u1 v1 =
     let ftvs = TV.big_union [ftv_tyenv env; ftv_ty u1; ftv_exp v1] in
-    TV.elements @@ TV.diff (Syntax.CC.ftv_exp w1) ftvs
+    TV.elements @@ TV.diff (Syntax.CSR.ftv_exp w1) ftvs
 
-  let rec is_base_value env u =
-    assert (u = TyInt || u = TyBool || u = TyUnit);
-    function
-    | Var (_, x, ys) ->
-      begin try
-        let TyScheme (xs, u') = Environment.find x env in
-        let s = Utils.List.zip xs !ys in
-        subst_type s u' = u
-      with Not_found ->
-        raise @@ Type_bug (asprintf "variable '%s' not found in the environment" x)
-      end
-    | IConst _ when u = TyInt -> true
-    | BConst _ when u = TyBool -> true
-    | UConst _ when u = TyUnit -> true
-    | AscExp (r, e, TyVar (_, { contents = Some u' })) ->
-      is_base_value env u @@ AscExp (r, e, u')
-    | AscExp (_, e, u') when u = u' -> is_base_value env u e
-    | _ -> false
+  let generate_constraints env e b =
+    let rec generate_constraints env e b =
+      let t, a, c = match e with
+        | Var (_, x, ys) ->
+          let u_a = b in (
+            try
+              let TyScheme (xs, u)= Environment.find x env in
+              (* Replace type variables with fresh ones *)
+              ys := List.map (fun _ -> fresh_tyvar ()) xs;
+              let s = Utils.List.zip xs !ys in
+              (subst_type2 s u), u_a, Constraints.empty
+            with Not_found ->
+              raise @@ Type_error (Printf.sprintf "variable '%s' not found in the environment" x)
+          )
+        | Const (_, c) ->
+          let u_a = b in
+          let u = type_of_const c in
+          u, u_a, Constraints.empty
+        | BinOp (_, op, e1, e2) ->
+          let ui1, ui2, ui = type_of_binop op in
+          let u_a0 = b in
+          let u1, u_a1, c1 = generate_constraints env e1 u_a0 in
+          let u2, u_a2, c2 = generate_constraints env e2 u_a1 in
+          let c = Constraints.union c1
+            @@ Constraints.union c2
+            @@ (Constraints.add (CConsistent (u1, ui1))
+                @@ Constraints.singleton
+                @@ CConsistent (u2, ui2) )in
+          ui, u_a2, c
+        | Fun (_, u_g, x, u_1, e) ->
+          let u_a = b in
+          let u_2, u_b, c = generate_constraints (Environment.add x (tysc_of_ty u_1) env) e u_g in
+          TyFun (u_1, u_b, u_2, u_g), u_a, c
 
-  let rec is_fun_value env = function
-    | Var (_, x, ys) ->
-      begin try
-        begin
-          let TyScheme (xs, u') = Environment.find x env in
-          let s = Utils.List.zip xs !ys in
-          begin match subst_type s u' with
-          | TyFun _ -> true
-          | _ -> false
-          end
-        end with Not_found ->
-          raise @@ Type_bug (asprintf "variable '%s' not found in the environment" x)
-      end
-    | FunEExp _
-    | FunIExp _
-    | FixEExp _
-    | FixIExp _ -> true
-    | AscExp (_, e, TyFun _) -> is_fun_value env e
-    | AscExp (r, e, TyVar (_, { contents = Some u })) -> is_fun_value env @@ AscExp (r, e, u)
-    | _ -> false
+        | App (_, e1, e2) ->
+          let u_d = b in
+          let u_1, u_g, c1 = generate_constraints env e1 u_d in
+          let u_2, u_b, c2 = generate_constraints env e2 u_g in
+          let u, c3 = generate_constraints_domc_eq u_1 in
+          let u_a, c4 = generate_constraints_codc_eq u_1 in
+          let c5 = generate_constraints_codf_con u_1 u_b in
+          let c6 = generate_constraints_domf_con u_1 u_2 in
+          let c = Constraints.union c1
+            @@ Constraints.union c2
+            @@ Constraints.union c3
+            @@ Constraints.union c4
+            @@ Constraints.union c5 c6 in
+          u, u_a, c
+        | Shift (_, k, u_s, e) ->
+          let u_b = b in
+          let u_d, u_d', c1 = generate_constraints (Environment.add k (tysc_of_ty u_s) env) e u_b in
+          let u_a, c2 = generate_constraints_domc_eq u_s in
+          let u, c3 = generate_constraints_domf_eq u_s in
+          let u_g1, c4 = generate_constraints_codc_eq u_s in
+          let u_g2, c5 = generate_constraints_codf_eq u_s in
+          let _, c6 = generate_constraints_meet u_g1 u_g2 in
+          let c = Constraints.union c1
+            @@ Constraints.union c2
+            @@ Constraints.union c3
+            @@ Constraints.union c4
+            @@ Constraints.union c5
+            @@ Constraints.union c6
+            @@ Constraints.singleton
+            @@ CConsistent (u_d, u_d') in
+          u, u_a, c
+        | Reset (_, e, u) ->
+          let u_a = b in
+          let u_b, u_b', c = generate_constraints env e u in
+          let c = Constraints.add (CConsistent (u_b, u_b')) c in
+          u, u_a, c
+        | If (_, e1, e2, e3) ->
+          let u_b = b in
+          let u_1, u_d, c1 = generate_constraints env e1 u_b in
+          let u_2, u_a2, c2 = generate_constraints env e2 u_d in
+          let u_3, u_a3, c3 = generate_constraints env e3 u_d in
+          let u_a, c4 = generate_constraints_meet u_a2 u_a3 in
+          let u, c5 = generate_constraints_meet u_2 u_3 in
+          let c = Constraints.union c1
+            @@ Constraints.union c2
+            @@ Constraints.union c3
+            @@ Constraints.union c4
+            @@ Constraints.union c5
+            @@ Constraints.singleton
+            @@ CConsistent (u_1, TyBase TyBool) in
+          u, u_a, c
+        | Consq (_, e1, e2) ->
+          let u_g = b in
+          let u_1, u_b, c1 = generate_constraints env e1 u_g in
+          let u_2, u_a, c2 = generate_constraints env e2 u_b in
+          let c = Constraints.union c1
+            @@ Constraints.union c2
+            @@ Constraints.singleton
+            @@ CConsistent (u_1, TyBase TyUnit) in
+          u_2, u_a, c
+        | Pure (_, e) ->
+          let u_b = b in
+          let a, u_a, c1 = generate_constraints env e TyDyn in
+          let u_a = subst_type_substitutions u_a (unify c1) in
+          if u_a = TyDyn then
+            a, u_b, c1
+          else
+            raise @@ Type_error (Printf.sprintf "pure error")
+        | Let (r, id, e1, e2) ->
+          let u_b = b in
+          let u1, _, c1 = generate_constraints env e1 (fresh_tyvar ()) in
+          if is_pure e1 then
+            let unify = unify c1 in
+            let u1 = subst_type_substitutions u1 unify in
+            (* let env = subst_env_substitutions env unify in *) (* problem *)
+            let e1 = subst_exp_substitutions e1 unify in
+            let xs = closure_tyvars1 u1 env e1 in
+            let us1 = TyScheme (xs,u1) in
+            let a, _, c2 = generate_constraints (Environment.add id us1 env) e2 u_b in
+            let c = Constraints.union c1 c2 in
+            a, u_b, c
+          else
+            generate_constraints env (App(r, Fun(r, fresh_tyvar (), id, fresh_tyvar(), e2), e1)) u_b
+      in
+      t, a, c
+    in
+    generate_constraints env e b
 
-  let rec is_tyvar_value env x = function
-    | Var (_, x', ys) ->
-      begin
-        try
-          let TyScheme (xs, u') = Environment.find x' env in
-          let s = Utils.List.zip xs !ys in
-          begin match subst_type s u' with
-          | TyVar (x'', _) when x = x'' -> true
-          | _ -> false
-          end
-        with Not_found ->
-          raise @@ Type_bug (asprintf "variable '%s' not found in the environment" x')
-      end
-    | AscExp (r, e, TyVar (_, { contents = Some u })) ->
-        is_tyvar_value env x @@ AscExp (r, e, u)
-    | AscExp (_, e, TyVar (x', { contents = None })) when x = x' ->
-        is_tyvar_value env x e
-    | _ -> false
+  let cast f u1 u2 = if u1 = u2 then f else CSR.Cast (CSR.range_of_exp f, f, u1, u2, Pos)
 
-  (** Returns true if a given expression is a "value" under the given environment.
-   * The definition of "value" slightly differs that in the paper
-   * to allow more type variables are generalized by let. *)
-  let rec is_value env = function
-    | Var _
-    | IConst _
-    | BConst _
-    | UConst _
-    | FunEExp _
-    | FunIExp _
-    | FixEExp _
-    | FixIExp _ -> true
-    | AscExp (_, e, (TyInt | TyBool | TyUnit as u)) when is_base_value env u e -> true
-    | AscExp (_, e, TyFun _) when is_fun_value env e -> true
-    | AscExp (_, e, TyDyn) when is_value env e -> true
-    | AscExp (r, e, TyVar (_, { contents = Some u })) -> is_value env @@ AscExp (r, e, u)
-    | AscExp (_, e, TyVar (x, { contents = None })) -> is_tyvar_value env x e
-    | _ -> false
-
-  (* Type inference *)
-
-  let rec type_of_exp env = function
-    | Var (_, x, ys) ->
-      begin
-        try
-          let TyScheme (xs, u) = Environment.find x env in
-          (* Replace type variables with fresh ones *)
-          ys := List.map (fun _ -> fresh_tyvar ()) xs;
-          let s = Utils.List.zip xs !ys in
-          subst_type s u
-        with Not_found ->
-          raise @@ Type_error (asprintf "variable '%s' not found in the environment" x)
-      end
-    | IConst _ -> TyInt
-    | BConst _ -> TyBool
-    | UConst _ -> TyUnit
-    | BinOp (_, op, e1, e2) ->
-      let ui1, ui2, ui = type_of_binop op in
-      let u1 = type_of_exp env e1 in
-      let u2 = type_of_exp env e2 in
-      unify @@ CConsistent (u1, ui1);
-      unify @@ CConsistent (u2, ui2);
-      ui
-    | AscExp (_, e, u1) ->
-      let u = type_of_exp env e in
-      unify @@ CConsistent (u, u1);
-      u1
-    | IfExp (_, e1, e2, e3) ->
-      let u1 = type_of_exp env e1 in
-      let u2 = type_of_exp env e2 in
-      let u3 = type_of_exp env e3 in
-      unify @@ CConsistent (u1, TyBool);
-      type_of_meet u2 u3
-    | FunEExp (_, x, u1, e)
-    | FunIExp (_, x, u1, e) ->
-      let u2 = type_of_exp (Environment.add x (tysc_of_ty u1) env) e in
-      TyFun (u1, u2)
-    | FixEExp (_, x, y, u1, u2, e)
-    | FixIExp (_, x, y, u1, u2, e) ->
-      let env = Environment.add x (tysc_of_ty (TyFun (u1, u2))) env in
-      let env = Environment.add y (tysc_of_ty u1) env in
-      let u2' = type_of_exp env e in
-      unify @@ CConsistent (u2, u2');
-      TyFun (u1, u2)
-    | AppExp (_, e1, e2) ->
-      let u1 = type_of_exp env e1 in
-      let u2 = type_of_exp env e2 in
-      let u3 = type_of_cod_eq u1 in
-      type_of_dom_con u1 u2;
-      u3
-    | LetExp (r, x, e1, e2) ->
-      let u1 = type_of_exp env e1 in
-      if is_value env e1 then
-        let xs = closure_tyvars1 u1 env e1 in
-        let us1 = TyScheme (xs, u1) in
-        type_of_exp (Environment.add x us1 env) e2
-      else
-        type_of_exp env @@ AppExp (r, FunIExp (r, x, u1, e2), e1)
-
-  let type_of_program env = function
-    | Exp e ->
-      env, Exp e, type_of_exp env e
-    | LetDecl (x, e) ->
-      let u = type_of_exp env e in
-      let xs = if is_value env e then closure_tyvars_let_decl e u env else [] in
-      let env = Environment.add x (TyScheme (xs, u)) env in
-      env, LetDecl (x, e), u
-
-  (* Normalize type variables *)
-
-  let rec normalize_type = function
-    | TyVar (_, { contents = Some u }) -> normalize_type u
-    | TyFun (u1, u2) -> TyFun (normalize_type u1, normalize_type u2)
-    | _ as u -> u
-
-  let normalize_tyenv =
-    Environment.map @@ fun (TyScheme (xs, u)) -> TyScheme (xs, normalize_type u)
-
-  let rec normalize_exp = function
-    | Var (r, x, ys) -> Var (r, x, ref @@ List.map normalize_type !ys)
-    | IConst _
-    | BConst _
-    | UConst _ as e -> e
-    | BinOp (r, op, e1, e2) ->
-      BinOp (r, op, normalize_exp e1, normalize_exp e2)
-    | AscExp (r, e, u) ->
-      AscExp (r, normalize_exp e, normalize_type u)
-    | IfExp (r, e1, e2, e3) ->
-      IfExp (r, normalize_exp e1, normalize_exp e2, normalize_exp e3)
-    | FunEExp (r, x1, u1, e) ->
-      FunEExp (r, x1, normalize_type u1, normalize_exp e)
-    | FunIExp (r, x1, u1, e) ->
-      FunIExp (r, x1, normalize_type u1, normalize_exp e)
-    | FixEExp (r, x, y, u1, u2, e) ->
-      FixEExp (r, x, y, normalize_type u1, normalize_type u2, normalize_exp e)
-    | FixIExp (r, x, y, u1, u2, e) ->
-      FixIExp (r, x, y, normalize_type u1, normalize_type u2, normalize_exp e)
-    | AppExp (r, e1, e2) ->
-      AppExp (r, normalize_exp e1, normalize_exp e2)
-    | LetExp (r, y, e1, e2) ->
-      LetExp (r, y, normalize_exp e1, normalize_exp e2)
-
-  let normalize_program = function
-    | Exp e -> Exp (normalize_exp e)
-    | LetDecl (x, e) -> LetDecl (x, normalize_exp e)
-
-  let normalize env p u =
-    normalize_tyenv env,
-    normalize_program p,
-    normalize_type u
-
-  (* Cast insertion translation *)
-
-  let cast f u1 u2 =
-    if u1 = u2 then f  (* Omit identity cast for better performance *)
-    else CC.CastExp (CC.range_of_exp f, f, u1, u2, Pos)
-
-  let rec translate_exp env = function
+  (* if translate raises an error, it must be some problem in inference *)
+  let rec translate env e u_b = match e with
     | Var (r, x, ys) -> begin
         try
           let TyScheme (xs, u) = Environment.find x env in
           let ftvs = ftv_ty u in
           let s = Utils.List.zip xs !ys in
-          let ys = List.map (fun (x, u) -> if TV.mem x ftvs then CC.Ty u else CC.TyNu) s
+          let ys = List.map (fun (x, u) -> if TV.mem x ftvs then CSR.Ty u else CSR.TyNu) s
           in
-          let ys = ys @ Utils.List.repeat CC.TyNu (List.length xs - List.length ys) in
-          let u = subst_type (List.filter (fun (x, _) -> TV.mem x ftvs) s) u in
-          CC.Var (r, x, ys), u
+          let ys = ys @ Utils.List.repeat CSR.TyNu (List.length xs - List.length ys) in
+          let u = subst_type2 (List.filter (fun (x, _) -> TV.mem x ftvs) s) u in
+          CSR.Var (r, x, ys), u, u_b
         with Not_found ->
-          raise @@ Type_bug "variable not found during cast-inserting translation"
+          raise @@ Type_fatal_error (Printf.sprintf "variable '%s' not found in the environment" x)
       end
-    | IConst (r, i) -> CC.IConst (r, i), TyInt
-    | BConst (r, b) -> CC.BConst (r, b), TyBool
-    | UConst r -> CC.UConst r, TyUnit
+    | Const (r, c) ->
+      let u = type_of_const c in
+      CSR.Const (r, c), u, u_b
     | BinOp (r, op, e1, e2) ->
       let ui1, ui2, ui = type_of_binop op in
-      let f1, u1 = translate_exp env e1 in
-      let f2, u2 = translate_exp env e2 in
-      CC.BinOp (r, op, cast f1 u1 ui1, cast f2 u2 ui2), ui
-    | AscExp (_, e, u1) ->
-      let f, u = translate_exp env e in
-      if is_consistent u u1 then
-        cast f u u1, u1
+      let f1, u1, u1_a = translate env e1 u_b in
+      let f2, u2, u2_a = translate env e2 u1_a in
+      if is_consistent u1 ui1 then
+        if is_consistent u2 ui2 then
+          CSR.BinOp (r, op, (cast  f1 u1 ui1), (cast f2 u2 ui2)), ui, u2_a
+        else
+          raise @@ Type_fatal_error "binop: the second argument"
       else
-        raise @@ Type_bug "type ascription"
-    | IfExp (r, e1, e2, e3) ->
-      let f1, u1 = translate_exp env e1 in
-      let f2, u2 = translate_exp env e2 in
-      let f3, u3 = translate_exp env e3 in
+        raise @@ Type_fatal_error "binop: the first argument"
+    | Fun (r, u_g, x, u_1, e) ->
+      let u_a = u_b in
+      let f, u_2, u_b = translate (Environment.add x (tysc_of_ty u_1) env) e u_g in
+      CSR.Fun (r,u_g, x, u_1, f), TyFun (u_1, u_b, u_2, u_g), u_a
+    | App (r, e1, e2) ->
+      let f1, u1, u_g = translate env e1 u_b in
+      let f2, u2, u_b = translate env e2 u_g in
+      begin match is_consistent (codf u1) u_b, is_consistent (domf u1) u2 with
+        | true, true ->
+          CSR.App (r, cast f1 u1 (TyFun (domf u1, codc u1, domc u1, u_b)),
+                   cast f2 u2 (domf u1)),
+          domc u1,
+          codc u1
+        | _ -> raise @@ Type_fatal_error "app: not consistent"
+      end
+    | Shift (r, k, u_s, e) ->
+      let f, u_d, u_d' = translate (Environment.add k (tysc_of_ty u_s) env) e u_b in
+      let u_g = meet (codc u_s) (codf u_s) in
+      let k' = fresh_var () in
+      begin match is_consistent u_d u_d', is_consistent (codc u_s) (codf u_s) with
+        | true, true ->
+          let f' = cast f u_d u_d' in
+          let u_s' = TyFun (domf u_s, u_g, domc u_s, u_g) in
+          begin
+            if u_s = u_s' then
+              CSR.Shift (r, k, u_s', f')
+            else
+              CSR.Shift (
+                r, k', u_s',
+                CSR.App (r, CSR.Fun (r, u_b, k, u_s, f'),
+                         CSR.Cast (r, CSR.Var (r, k',[]), u_s', u_s, Neg)))  (*???*)
+          end,
+          domf u_s,
+          domc u_s
+        | _ -> raise @@ Type_fatal_error "shift: not consistent"
+      end
+    | Reset (r, e, u) ->
+      let u_a = u_b in
+      let f, u_b, u_b' = translate env e u in
+      if is_consistent u_b u_b' then
+        CSR.Reset (r, cast f u_b u_b', u), u, u_a
+      else
+        raise @@ Type_fatal_error "reset: not consistent"
+    | If (r, e1, e2, e3) ->
+      let f1, u1, u_d = translate env e1 u_b in
+      let f2, u2, u_a2 = translate env e2 u_d in
+      let f3, u3, u_a3 = translate env e3 u_d in
+      let u_a = meet u_a2 u_a3 in
       let u = meet u2 u3 in
-      CC.IfExp (r, cast f1 u1 TyBool, cast f2 u2 u, cast f3 u3 u), u
-    | FunEExp (r, x, u1, e)
-    | FunIExp (r, x, u1, e) ->
-      let f, u2 = translate_exp (Environment.add x (tysc_of_ty u1) env) e in
-      CC.FunExp (r, x, u1, f), TyFun (u1, u2)
-    | FixEExp (r, x, y, u1, u2, e)
-    | FixIExp (r, x, y, u1, u2, e) ->
-      (* NOTE: Disallow to use x polymorphically in e *)
-      let env = Environment.add x (tysc_of_ty (TyFun (u1, u2))) env in
-      let env = Environment.add y (tysc_of_ty u1) env in
-      let f, u2' = translate_exp env e in
-      CC.FixExp (r, x, y, u1, u2, cast f u2' u2), TyFun (u1, u2)
-    | AppExp (r, e1, e2) ->
-      let f1, u1 = translate_exp env e1 in
-      let f2, u2 = translate_exp env e2 in
-      CC.AppExp (r, cast f1 u1 (TyFun (dom u1, cod u1)), cast f2 u2 (dom u1)), cod u1
-    | LetExp (r, x, e1, e2) when is_value env e1 ->
-      let f1, u1 = translate_exp env e1 in
+      let k2, k3 = fresh_var (), fresh_var () in
+      let cast_e  k' f' u' u_a' =
+        let r = CSR.range_of_exp f' in
+        let f' = cast f' u' u in
+        if u_a = u_a' then
+          f'
+        else
+          CSR.Shift (
+            r, k', TyFun (u, u_a, u_a, u_a),
+            CSR.App (
+              r, CSR.Cast (r, CSR.Var (r, k',[]), TyFun (u, u_a, u_a, u_a),
+                           TyFun (u, u_a, u_a, u_a'), Neg), (* ? *)
+              f')) in
+      if is_consistent u1 @@ TyBase TyBool then
+        CSR.If (
+          r,
+          cast f1 u1 (TyBase TyBool),
+          cast_e k2 f2 u2 u_a2,
+          cast_e k3 f3 u3 u_a3
+        ), u, u_a
+      else
+        raise @@ Type_fatal_error "if: not consistent"
+    | Consq (r, e1, e2) ->
+      let u_g = u_b in
+      let f1, u1, u_b = translate env e1 u_g in
+      let f2, u2, u_a = translate env e2 u_b in
+      if is_consistent u1 @@ TyBase TyUnit then
+        CSR.Consq (r, cast f1 u1 (TyBase TyUnit), f2), u2, u_a
+      else
+        raise @@ Type_fatal_error "consq: not consistent"
+    | Pure (r, e) ->
+      let u_b' = u_b in
+      let f, a, u_a  = translate env e TyDyn in
+      if u_a = TyDyn then
+        (CSR.Pure (r, a, f)), a, u_b'
+      else
+        raise @@ Type_fatal_error "pure: not consistent"
+    | Let (r, x, e1, e2) when is_pure  e1 ->
+      let alpha = fresh_tyvar () in  (* answer type polymorphism *)
+      let f1, u1, _ = translate env e1 alpha in
       let xs = closure_tyvars1 u1 env e1 in
       let ys = closure_tyvars2 f1 env u1 e1 in
-      let xys = xs @ ys in
+      let zs = TV.elements((ftv_ty alpha)) in
+      let xys = xs @ (ys @ zs) in
       let us1 = TyScheme (xys, u1) in
-      let f2, u2 = translate_exp (Environment.add x us1 env) e2 in
-      CC.LetExp (r, x, xys, f1, f2), u2
-    | LetExp (r, x, e1, e2) ->
-      let _, u1 = translate_exp env e1 in
-      let e = AppExp (r, FunIExp (r, x, u1, e2), e1) in
-      translate_exp env e
-
-  let translate env = function
-    | Exp e ->
-      let f, u = translate_exp env e in
-      env, CC.Exp f, u
-    | LetDecl (x, e) when is_value env e ->
-      let f, u = translate_exp env e in
-      let xs = closure_tyvars_let_decl e u env in
-      let ys = closure_tyvars2 f env u e in
-      let env = Environment.add x (TyScheme (xs @ ys, u)) env in
-      env, CC.LetDecl (x, xs @ ys, f), u
-    | LetDecl (x, e) ->
-      let f, u = translate_exp env e in
-      env, CC.LetDecl (x, [], f), u
+      let f2, u2, u_a = translate (Environment.add x us1 env) e2 u_b in
+      CSR.Let (r, x, xys, f1, f2), u2, u_a
+    | Let (r, x, e1, e2) ->
+      let _, u1, _ = translate env e1 u_b in
+      let e = App (r, Fun (r, u_b, x, u1, e2), e1) in
+      translate env e u_b
 end
 
-module CC = struct
-  open Syntax.CC
+(* When you're sure that this tyarg does not contain ν
+ * you can convert it to ty *)
+let tyarg_to_ty = function
+  | CSR.Ty u -> u
+  | CSR.TyNu -> raise @@ Type_fatal_error "failed to cast tyarg to ty"
 
-  let rec type_of_exp env = function
-    | Var (_, x, ys) -> begin
+module CSR = struct
+  open Syntax.CSR
+
+  let is_pure = function
+    | Var _ -> true
+    | Const _ -> true
+    | Fun _  -> true
+    | Reset _ -> true
+    | Pure _ -> true
+    | _ -> false
+
+  let rec type_of_exp env f ub = match f with
+    | Var (_, x, ys) ->
+      begin
         try
           let TyScheme (xs, u) = Environment.find x env in
           if List.length xs = List.length ys then
@@ -532,66 +573,83 @@ module CC = struct
             let s = Utils.List.zip xs ys in
             let s = List.filter (fun (x, _) -> TV.mem x ftvs) s in
             let s = List.map (fun (x, u) -> x, tyarg_to_ty u) s in
-            subst_type s u
+            (subst_type2 s u), ub
           else
-            raise @@ Type_bug "invalid type application"
+            raise @@ Type_fatal_error (Printf.sprintf "invalid type application")
         with Not_found ->
-          raise @@ Type_bug "variable not found"
+          raise @@ Type_fatal_error (Printf.sprintf "variable '%s' not found in the environment" x)
       end
-    | IConst _ -> TyInt
-    | BConst _ -> TyBool
-    | UConst _ -> TyUnit
+    | Const (_, c) ->
+      let u = type_of_const c in
+      u, ub
     | BinOp (_, op, f1, f2) ->
-      let u1 = type_of_exp env f1 in
-      let u2 = type_of_exp env f2 in
       let ui1, ui2, ui = type_of_binop op in
-      if (u1, u2) = (ui1, ui2) then
-        ui
-      else
-        raise @@ Type_bug "binop"
-    | IfExp (_, f1, f2, f3) ->
-      let u1 = type_of_exp env f1 in
-      let u2 = type_of_exp env f2 in
-      let u3 = type_of_exp env f3 in
-      if u1 = TyBool && u2 = u3 then
-        u2
-      else
-        raise @@ Type_bug "if"
-    | FunExp (_, x, u1, f) ->
-      let u2 = type_of_exp (Environment.add x (tysc_of_ty u1) env) f in
-      TyFun (u1, u2)
-    | FixExp (_, x, y, u1, u, f) ->
-      let u2 = type_of_exp (Environment.add y (tysc_of_ty u1) (Environment.add x (tysc_of_ty (TyFun (u1, u))) env)) f in
-      TyFun (u1, u2)
-    | AppExp (_, f1, f2) ->
-      let u1 = type_of_exp env f1 in
-      let u2 = type_of_exp env f2 in
-      begin match u1, u2 with
-        | TyFun (u11, u12), u2 when u11 = u2 ->
-          u12
-        | _ -> raise @@ Type_bug "app"
-      end
-    | CastExp (r, f, TyVar (_, { contents = Some u1 }), u2, p)
-    | CastExp (r, f, u1, TyVar (_, { contents = Some u2 }), p) ->
-      type_of_exp env @@ CastExp (r, f, u1, u2, p)
-    | CastExp (_, f, u1, u2, _) ->
-      let u = type_of_exp env f in
-      if u = u1 then
-        if is_consistent u1 u2 then
-          u2
+      let u1, ua1 = type_of_exp env f1 ub in
+      let u2, ua2 = type_of_exp env f2 ua1 in
+      if u1 = ui1 then
+        if u2 = ui2 then
+          ui, ua2
         else
-          raise @@ Type_bug "not consistent"
+          raise @@ Type_fatal_error "binop: the second argument type"
       else
-        raise @@ Type_bug "invalid source type"
-    | LetExp (_, x, xs, f1, f2) when is_value f1 ->
-      let u1 = type_of_exp env f1 in
+        raise @@ Type_fatal_error "binop: the first argument type"
+    | Fun (_, ug, x, u1, f) ->
+      let ua = ub in
+      let u2, ub = type_of_exp (Environment.add x (tysc_of_ty u1) env) f ug in
+      TyFun (u1, ub, u2, ug), ua
+    | App (_, f1, f2) ->
+      let ud = ub in
+      let u1, ug = type_of_exp env f1 ud in
+      let u2, ub = type_of_exp env f2 ug in
+      begin match u1, (codf u1) = ub, (domf u1) = u2 with
+        | TyFun _, true, true -> domc u1, codc u1
+        | _ -> raise @@ Type_fatal_error "app"
+      end
+    | Shift (_, k, us, f) ->
+      let ud, ud' = type_of_exp (Environment.add k (tysc_of_ty us) env) f ub in
+      begin match us, (codc us) = (codf us), ud = ud' with
+        | TyFun _, true, true -> domf us, domc us
+        | _ -> raise @@ Type_fatal_error "shift"
+      end
+    | Reset (_, f, u) ->
+      let ua = ub in
+      let ub, ub' = type_of_exp env f u in
+      if ub = ub' then
+        u, ua
+      else
+        raise @@ Type_fatal_error "reset"
+    | If (_, f1, f2, f3) ->
+      let u1, ud = type_of_exp env f1 ub in
+      let u2, ua2 = type_of_exp env f2 ud in
+      let u3, ua3 = type_of_exp env f3 ud in
+      begin match u1 = TyBase TyBool, u2 = u3, ua2 = ua3 with
+        | true, true, true -> u2, ua2
+        | _ -> raise @@ Type_fatal_error "if"
+      end
+    | Consq (_, f1, f2) ->
+      let ug = ub in
+      let u1, ub = type_of_exp env f1 ug in
+      let u2, ua = type_of_exp env f2 ub in
+      if u1 = TyBase TyUnit then
+        u2, ua
+      else
+        raise @@ Type_fatal_error "consq"
+    | Cast (_, f, u1, u2, _) ->
+      let u1', ua = type_of_exp env f ub in
+      begin match u1 = u1', is_consistent u1 u2 with
+        | true, true -> u2, ua
+        | _ -> raise @@ Type_fatal_error "cast"
+      end
+    | Pure (_, a, f) ->
+      let a', ua = type_of_exp env f TyDyn in
+      if a=a'  && ua = TyDyn then
+        a, ub
+      else raise @@ Type_fatal_error "pure"
+    | Let (_, x, xs, f1, f2) when is_pure f1 ->
+      let u1, _ = type_of_exp env f1 ub in
       let us1 = TyScheme (xs, u1) in
-      let u2 = type_of_exp (Environment.add x us1 env) f2 in
-      u2
-    | LetExp _ ->
-      raise @@ Type_bug "invalid translation for let expression"
-
-  let type_of_program env = function
-    | Exp e -> type_of_exp env e
-    | LetDecl (_, _, f) -> type_of_exp env f
+      let u2,u_b = type_of_exp (Environment.add x us1 env) f2 ub in
+      u2, u_b
+    | Let _ ->
+      raise @@ Type_fatal_error "invalid translation for let expression"
 end

@@ -82,6 +82,7 @@ module GSR = struct
     | Consq of range * exp * exp
     | Pure of range * exp
     | Let of range * id * exp * exp
+    | Fix of range * id * id * ty * ty * ty * ty * exp
 
   let range_of_exp = function
     | Var (r, _, _)
@@ -94,7 +95,8 @@ module GSR = struct
     | If (r, _, _, _)
     | Consq (r, _, _)
     | Pure (r, _)
-    | Let (r, _, _, _) -> r
+    | Let (r, _, _, _)
+    | Fix (r, _, _, _, _, _, _, _) -> r
 
   type directive =
     | BoolDir of string * bool
@@ -115,6 +117,7 @@ module GSR = struct
     | Consq (r, e1, e2) -> Consq (r, f_exp e1, f_exp e2)
     | Pure (r, e) -> Pure (r, f_exp e)
     | Let (r, id,e1,e2) -> Let (r, id, f_exp e1,f_exp e2)
+    | Fix (r, x, y, u1, u2, u3, u4, e) -> Fix (r, x, y, f_ty u1, f_ty u2, f_ty u3, f_ty u4, f_exp e)
 
   let rec tv_exp: exp -> TV.t = function
     | Var _
@@ -128,6 +131,7 @@ module GSR = struct
     | Reset (_, e, u) -> TV.union (ftv_ty u) (tv_exp e)
     | Pure (_, e) -> tv_exp e
     | Consq (_, e1, e2) -> TV.union (tv_exp e1) (tv_exp e2)
+    | Fix (_, _, _, u1, u2, u3, u4, e) -> TV.big_union @@ [ftv_ty u1; ftv_ty u2; ftv_ty u3; ftv_ty u4; tv_exp e]
 
   let rec ftv_exp: exp -> TV.t = function
     | Var _
@@ -141,6 +145,7 @@ module GSR = struct
     | Reset (_, e, _) -> ftv_exp e
     | Pure (_, e) -> ftv_exp e
     | Consq (_, e1, e2) -> TV.union (ftv_exp e1) (ftv_exp e2)
+    | Fix (_, _, _, _, _, _, _, e) -> ftv_exp e
 end
 
 module CSR = struct
@@ -164,6 +169,7 @@ module CSR = struct
     | Cast of range * exp * ty * ty * polarity
     | Pure of range * ty * exp
     | Let of range * id * tyvar list * exp * exp
+    | Fix of range * id * id * ty * ty * ty * ty * exp
 
   let range_of_exp = function
     | Var (r, _, _)
@@ -177,7 +183,8 @@ module CSR = struct
     | Consq (r, _, _)
     | Cast (r, _, _, _, _)
     | Pure (r, _, _)
-    | Let (r, _, _, _, _) -> r
+    | Let (r, _, _, _, _)
+    | Fix (r, _, _, _, _, _, _, _) -> r
 
   let map f_ty f_exp = function
     | Var _ as e -> e
@@ -192,6 +199,7 @@ module CSR = struct
     | Cast (r, e, u1, u2, p) -> Cast (r, f_exp e, f_ty u1, f_ty u2, p)
     | Pure (r, ty, e)  -> Pure (r, f_ty ty, f_exp e)
     | Let (r, id, xs, e1, e2) -> Let (r, id, xs, f_exp e1, f_exp e2)
+    | Fix (r, x, y, u1, u2, u3, u4, e) -> Fix (r, x, y, f_ty u1, f_ty u2, f_ty u3, f_ty u4, f_exp e)
 
   let ftv_tyarg = function
     | Ty ty -> ftv_ty ty
@@ -210,6 +218,7 @@ module CSR = struct
     | Pure (_, _, e) -> ftv_exp e
     | Consq (_, e1, e2) -> TV.union (ftv_exp e1) (ftv_exp e2)
     | Cast (_, e, u1, u2, _) -> TV.union (ftv_exp e) @@ TV.union (ftv_ty u1) (ftv_ty u2)
+    | Fix (_, _, _, _, _, _, _, e) -> ftv_exp e
 
   type tag = P of int | PP of int | I | B | U | Ar
 

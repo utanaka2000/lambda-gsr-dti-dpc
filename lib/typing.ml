@@ -149,6 +149,7 @@ module GSR = struct
     | Fun _  -> true
     | Reset _ -> true
     | Pure _ -> true
+    | Fix _ -> true
     | _ -> false
 
   let fresh_tyvar =
@@ -158,6 +159,8 @@ module GSR = struct
       counter := v + 1;
       TyVar (v + 1, {contents = None})
     in body
+
+  let fresh_tyfun = TyFun(fresh_tyvar (), fresh_tyvar (), fresh_tyvar (), fresh_tyvar ())
 
   (* Type Inference *)
 
@@ -407,7 +410,16 @@ module GSR = struct
             let c = Constraints.union c1 c2 in
             a, u_b, c
           else
-            generate_constraints env (App(r, Fun(r, fresh_tyvar (), id, fresh_tyvar(), e2), e1)) u_b
+            generate_constraints env (App (r, Fun (r, fresh_tyvar (), id, fresh_tyvar(), e2), e1)) u_b
+        | Fix (_, x, y, u1, u2, u3, u4, e) ->
+          let u_b = b in
+          let u = TyFun (u1, u2, u3, u4)  in
+          let env = Environment.add x (tysc_of_ty u) (Environment.add y (tysc_of_ty u1) env) in
+          let u3', u2', c1 = generate_constraints env e u4 in
+          let c = Constraints.union c1
+            @@ (Constraints.add (CConsistent (u2, u2'))
+            @@ Constraints.singleton (CConsistent (u3, u3'))) in
+          u, u_b, c
       in
       t, a, c
     in
@@ -544,6 +556,17 @@ module GSR = struct
       let _, u1, _ = translate env e1 u_b in
       let e = App (r, Fun (r, u_b, x, u1, e2), e1) in
       translate env e u_b
+    | Fix (r, x, y, u1, u2, u3, u4, e) ->   (* polarity? *)
+      let u = TyFun (u1, u2, u3, u4) in
+      let env = Environment.add x (tysc_of_ty u) (Environment.add y (tysc_of_ty u1) env) in
+      let f, u3', u2' = translate env e u4 in
+      if is_consistent u2 u2' && is_consistent u3 u3' then
+        let u' = TyFun (u1, u2', u3', u4) in
+        let y' = fresh_var () in
+        let f' = cast (CSR.Fun(r, u4, y', u1, f)) u' u in
+        CSR.Fix (r, x, y, u1, u2, u3, u4, CSR.App (r, f', Var(r, y, []))), u, u_b
+      else
+        raise @@ Type_fatal_error "fix not consistent"
 end
 
 (* When you're sure that this tyarg does not contain ν
@@ -561,6 +584,7 @@ module CSR = struct
     | Fun _  -> true
     | Reset _ -> true
     | Pure _ -> true
+    | Fix _ -> true
     | _ -> false
 
   let rec type_of_exp env f ub = match f with
@@ -652,4 +676,11 @@ module CSR = struct
       u2, u_b
     | Let _ ->
       raise @@ Type_fatal_error "invalid translation for let expression"
+    | Fix (_, x, y, u1, u2, u3, u4, f) ->
+      let u = TyFun (u1, u2, u3, u4) in
+      let u3', u2' = type_of_exp (Environment.add x (tysc_of_ty u) (Environment.add y (tysc_of_ty u1) env)) f u4 in
+      if u2=u2' && u3=u3' then
+        u, ub
+      else
+        raise @@ Type_fatal_error "fix"
 end

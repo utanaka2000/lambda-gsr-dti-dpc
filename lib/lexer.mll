@@ -16,6 +16,7 @@ let reservedWords = [
   ("pure", fun r ->  Parser.PURE r);
   ("let", fun r ->  Parser.LET r);
   ("in", fun r ->  Parser.IN r);
+  ("rec", fun r -> Parser.REC r);
 ]
 
 let range_of lexbuf =

@@ -2,13 +2,14 @@
 open Syntax
 open GSR
 open Utils.Error
+
 %}
 
 %token <Utils.Error.range> LPAREN RPAREN SEMI SEMISEMI COLON SLASH CARET SHARP
 %token <Utils.Error.range> PLUS MINUS STAR QUESTION
 %token <Utils.Error.range> FUN RARROW TRUE FALSE INT BOOL UNIT SHIFT RESET
 %token <Utils.Error.range> IF THEN ELSE PURE
-%token <Utils.Error.range> EQUAL GT LT LET IN
+%token <Utils.Error.range> EQUAL GT LT LET IN REC
 
 %token <int Utils.Error.with_range> INTV
 %token <Syntax.id Utils.Error.with_range> ID
@@ -44,13 +45,26 @@ Expr :
       Reset (r, e, u) }
   | start=SHIFT id=ID RARROW e=Expr {
       let r = join_range start (range_of_exp e) in
-      Shift (r, id.value, TyFun(Typing.GSR.fresh_tyvar (),Typing.GSR.fresh_tyvar (),Typing.GSR.fresh_tyvar (),Typing.GSR.fresh_tyvar ()), e) }
+      Shift (r, id.value, Typing.GSR.fresh_tyfun, e) }
   | start=SHIFT LPAREN id=ID COLON u=Type RPAREN RARROW e=Expr {
       let r = join_range start (range_of_exp e) in
       Shift (r, id.value, u, e) }
   | start=PURE e=Expr {
       let r = join_range start (range_of_exp e) in
-      Pure (r, e) }   (* ? *)
+      Pure (r, e) }   
+  (* let rec x (y:u1) (^u2) :u3 ^u4 = e1 in e2 *)
+  | start=LET REC x=ID y=ID LPAREN CARET u2=Type RPAREN u3=OptionalParamTypeAnnot u4=OptionalAnswerTypeAnnot EQUAL e1=Expr IN e2=Expr {
+      let r = join_range start (range_of_exp e2) in
+      Let (r, x.value, Fix (r, x.value, y.value, Typing.GSR.fresh_tyvar (), u2, u3, u4, e1), e2) }
+  | start=LET REC x=ID y=ID u3=OptionalParamTypeAnnot u4=OptionalAnswerTypeAnnot EQUAL e1=Expr IN e2=Expr {
+      let r = join_range start (range_of_exp e2) in
+      Let (r, x.value, Fix (r, x.value, y.value, Typing.GSR.fresh_tyvar (), Typing.GSR.fresh_tyvar (), u3, u4, e1), e2) }
+  | start=LET REC x=ID LPAREN y=ID COLON u1=Type RPAREN LPAREN CARET u2=Type RPAREN u3=OptionalParamTypeAnnot u4=OptionalAnswerTypeAnnot EQUAL e1=Expr IN e2=Expr {
+      let r = join_range start (range_of_exp e2) in
+      Let (r, x.value, Fix (r, x.value, y.value, u1, u2, u3, u4, e1), e2) }
+  | start=LET REC x=ID LPAREN y=ID COLON u1=Type RPAREN u3=OptionalParamTypeAnnot u4=OptionalAnswerTypeAnnot EQUAL e1=Expr IN e2=Expr {
+      let r = join_range start (range_of_exp e2) in
+      Let (r, x.value, Fix (r, x.value, y.value, u1, Typing.GSR.fresh_tyvar(), u3, u4, e1), e2) }
   | Consq_expr { $1 }
 
 Consq_expr :
@@ -103,6 +117,10 @@ AType :
 OptionalAnswerTypeAnnot :
   | { Typing.GSR.fresh_tyvar () }
   | CARET Type { $2 }
+
+OptionalParamTypeAnnot :
+  | { Typing.GSR.fresh_tyvar () }
+  | COLON Type { $2 }
 
 Directive :
   | id=ID TRUE { BoolDir (id.value, true) }

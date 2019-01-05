@@ -31,6 +31,8 @@ let rec subst_exp2 s = function
   | Shift (r, k, k_t, f) -> Shift(r, k, subst_type s k_t, subst_exp2 s f)
   | Reset (r, f, u) -> Reset(r, subst_exp2 s f, subst_type s u)
   | Pure (r, ty, f) -> Pure (r, subst_type s ty, subst_exp2 s f)
+  | Fix (r, x, y, u1, u2, u3, u4, f) ->
+      Fix(r, x, y, subst_type s u1, subst_type s u2, subst_type s u3, subst_type s u4, subst_exp2 s f)
   | _ as x -> x
 
 let fresh_typureparam =
@@ -129,8 +131,15 @@ let rec eval debug exp env cont =
     let v1 = eval debug f1 env (fun m -> m) in
     let env' = Environment.add x (xs, v1) env in
     eval debug f2 env' cont
-
-
+  | Fix (_, x, y, _, _, _, _, f') ->
+    let f (xs, ys) v k =
+      let f' = subst_exp2 (Utils.List.zip xs ys) f' in
+      let rec f _ v k =
+        let env = Environment.add x (xs, FunV f) env in
+        let env = Environment.add y ([], v) env in
+        eval debug f' env k
+      in f ([], []) v k
+    in cont @@ FunV f
 
 and cast debug r v u1 u2 p = (* v: u1 => u2 *)
   if debug then

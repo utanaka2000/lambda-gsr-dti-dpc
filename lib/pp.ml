@@ -165,6 +165,15 @@ module GSR = struct
         id
         pp_print_exp e1
         pp_print_exp e2
+    | Fix (_, x, y, u1, u2, u3, u4, e) ->
+      fprintf ppf "fix %s (%s: %a) %a :%a %a = %a"
+        x
+        y
+        pp_print_type u1
+        pp_print_answer_type_annot u2
+        pp_print_type u3
+        pp_print_answer_type_annot u4
+        pp_print_exp e
 end
 
 module CSR = struct
@@ -232,7 +241,15 @@ module CSR = struct
         pp_let_tyabses xs
         pp_print_exp e1
         pp_print_exp e2
-
+    | Fix (_, x, y, u1, u2, u3, u4, e) ->
+      fprintf ppf "fix %s (%s: %a) %a :%a %a = %a"
+        x
+        y
+        pp_print_type u1
+        pp_print_answer_type_annot u2
+        pp_print_type u3
+        pp_print_answer_type_annot u4
+        pp_print_exp e
   let pp_print_tag ppf = function
     | P p -> fprintf ppf "'x%d" p
     | PP p -> fprintf ppf "'X%d" p

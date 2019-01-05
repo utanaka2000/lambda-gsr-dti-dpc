@@ -36,6 +36,7 @@ module GSR : sig
   open Syntax.GSR
 
   val fresh_tyvar : unit -> ty
+  val fresh_tyfun : ty 
   val generate_constraints : tysc Environment.t -> exp -> ty -> (ty * ty * IConstraints.t )
 (* val type_of_exp : tysc Environment.t -> exp -> ty *)
   val unify : IConstraints.t -> substitutions

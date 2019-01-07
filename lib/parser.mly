@@ -126,3 +126,4 @@ OptionalParamTypeAnnot :
 Directive :
   | id=ID TRUE { BoolDir (id.value, true) }
   | id=ID FALSE { BoolDir (id.value, false) }
+  | id=ID  { StringDir (id.value) }

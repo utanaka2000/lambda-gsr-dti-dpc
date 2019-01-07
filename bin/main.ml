@@ -70,10 +70,11 @@ let rec read_eval_print lexbuf env tyenv dirs =
             Pp.pp_print_type u_b;
           (* Evaluation *)
           print_debug "***** Eval *****\n";
-          let env, v = Eval.eval_program !dirs.debug f env (fun x -> x) in
-          print "- : %a = %a\n"
+          let env, x, v = Eval.eval_program !dirs.debug f env (fun x -> x) in
+          print "%a : %a = %a\n"
+            pp_print_string x
             Pp.pp_ty2 u'  (* tyvar is printed like 'a *)
-            (* Pp.pp_print_type u' *)
+            (* Pp.pp_print_type u' *)   (* tyva is printed like 'x1 *)
             Pp.CSR.pp_print_value v;
           read_eval_print lexbuf env tyenv !dirs
         | Syntax.GSR.Directive d ->
@@ -81,6 +82,8 @@ let rec read_eval_print lexbuf env tyenv dirs =
             | Syntax.GSR.BoolDir ("debug", b) ->
               print "debug mode %a\n" pp_print_flag b;
               dirs := { debug = b }
+            | Syntax.GSR.StringDir ("quit") ->
+              exit 0
             | _ ->
               print "unsupported directive\n"
           end

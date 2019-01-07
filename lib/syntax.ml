@@ -100,6 +100,7 @@ module GSR = struct
 
   type directive =
     | BoolDir of string * bool
+    | StringDir of string
 
   type program =
     | Exp of exp

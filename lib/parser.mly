@@ -29,6 +29,7 @@ open Utils.Error
 toplevel :
   | Expr SEMISEMI { Exp $1 }
   | SHARP Directive SEMISEMI { Directive $2 }
+  | LET id=ID EQUAL e=Expr SEMISEMI { LetDecl (id.value, e) }
 
 Expr :
   | start=LET id=ID EQUAL e1=Expr IN e2=Expr {
@@ -51,7 +52,7 @@ Expr :
       Shift (r, id.value, u, e) }
   | start=PURE e=Expr {
       let r = join_range start (range_of_exp e) in
-      Pure (r, e) }   
+      Pure (r, e) }
   (* let rec x (y:u1) (^u2) :u3 ^u4 = e1 in e2 *)
   | start=LET REC x=ID y=ID LPAREN CARET u2=Type RPAREN u3=OptionalParamTypeAnnot u4=OptionalAnswerTypeAnnot EQUAL e1=Expr IN e2=Expr {
       let r = join_range start (range_of_exp e2) in

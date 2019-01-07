@@ -36,15 +36,21 @@ module GSR : sig
   open Syntax.GSR
 
   val fresh_tyvar : unit -> ty
-  val fresh_tyfun : ty 
+  val fresh_tyfun : ty
   val generate_constraints : tysc Environment.t -> exp -> ty -> (ty * ty * IConstraints.t )
 (* val type_of_exp : tysc Environment.t -> exp -> ty *)
   val unify : IConstraints.t -> substitutions
   val translate : tysc Environment.t -> exp -> ty -> (CSR.exp * ty * ty)
+
+  val reset_set : program -> program
+  val generate_constraints_program : tysc Environment.t -> program -> ty -> (ty * ty * IConstraints.t)
+  val subst_program : tysc Environment.t -> program -> ty -> ty -> ty -> substitutions -> ( tysc Environment.t * program * ty * ty * ty)
+  val translate_program : tysc Environment.t -> program -> ty -> (tysc Environment.t * CSR.program * ty * ty)
 end
 
 module CSR : sig
   open Syntax.CSR
 
   val type_of_exp : tysc Environment.t -> exp -> ty -> (ty * ty)
+  val type_of_program : tysc Environment.t -> program -> ty -> (ty * ty)
 end

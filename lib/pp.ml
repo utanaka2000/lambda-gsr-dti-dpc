@@ -174,6 +174,14 @@ module GSR = struct
         pp_print_type u3
         pp_print_answer_type_annot u4
         pp_print_exp e
+
+    let pp_program ppf = function
+      | Exp e -> pp_print_exp ppf e
+      | LetDecl (x, e) ->
+        fprintf ppf "let %s = %a"
+          x
+          pp_print_exp e
+      | _ -> raise @@ Failure ""
 end
 
 module CSR = struct
@@ -264,4 +272,12 @@ module CSR = struct
     | UnitV -> pp_print_string ppf "()"
     | FunV _ -> pp_print_string ppf "<fun>"
     | Tagged (t, v) -> fprintf ppf "%a : %a => ?" pp_print_value v pp_print_tag t
+
+  let pp_program ppf = function
+    | Exp e -> pp_print_exp ppf e
+    | LetDecl (x, xs, f) ->
+      fprintf ppf "let %s = %a%a"
+        x
+        pp_let_tyabses xs
+        pp_print_exp f
 end

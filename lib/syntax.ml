@@ -104,6 +104,7 @@ module GSR = struct
   type program =
     | Exp of exp
     | Directive of directive
+    | LetDecl of id * exp
 
   let map f_ty f_exp = function
     | Var (r, x, tyl) -> let tyl' = List.map f_ty !tyl in Var(r, x, ref tyl')
@@ -138,7 +139,7 @@ module GSR = struct
     | Const _ -> TV.empty
     | BinOp (_, _, e1, e2) -> TV.union (ftv_exp e1) (ftv_exp e2)
     | If (_, e1, e2, e3) -> TV.big_union @@ List.map ftv_exp [e1; e2; e3]
-    | Fun (_, _, _, _, e) -> ftv_exp e            (*????*)
+    | Fun (_, _, _, _, e) -> ftv_exp e
     | App (_, e1, e2) -> TV.union (ftv_exp e1) (ftv_exp e2)
     | Let (_, _, e1, e2) -> TV.union (ftv_exp e1) (ftv_exp e2)
     | Shift (_, _, _, e) -> ftv_exp e
@@ -170,6 +171,10 @@ module CSR = struct
     | Pure of range * ty * exp
     | Let of range * id * tyvar list * exp * exp
     | Fix of range * id * id * ty * ty * ty * ty * exp
+
+  type program =
+    | Exp of exp
+    | LetDecl of id * tyvar list * exp
 
   let range_of_exp = function
     | Var (r, _, _)

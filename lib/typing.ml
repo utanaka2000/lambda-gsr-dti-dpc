@@ -124,11 +124,6 @@ let subst_type_substitutions (t : ty) (s : substitutions) =
 let subst_exp_substitutions e (s : substitutions) =
   List.fold_left (fun e -> fun (x, t) -> subst_exp x t e) e s
 
-(* let subst_env_substitutions env s =
-   Environment.map @@ fun (TyScheme (xs, u)) -> TyScheme (subst_type2 , subst_type u) *)
-(* *)
-
-
 (* substitution for var argument *)
 let subst_type2 (s: (tyvar * ty) list) (u: ty) =
   (* {X':->U'}(U) *)
@@ -139,6 +134,15 @@ let subst_type2 (s: (tyvar * ty) list) (u: ty) =
     | _ as u -> u
   in
   List.fold_left subst u s
+
+(* S(Γ) *)
+let subst_env_substitutions env s =
+  let tv_to_ty xs = List.map (fun x -> TyVar x) xs in
+  let ty_to_tv ys = List.map
+      (function (TyVar (x, y)) -> (x, y) | _ -> raise @@ Type_error "") ys in
+  let f = fun (TyScheme(xs, u)) ->
+    (TyScheme (ty_to_tv (List.map (subst_type2 s) (tv_to_ty xs)), subst_type2 s u)) in
+  Environment.map f env
 
 module GSR = struct
   open Syntax.GSR
@@ -268,7 +272,6 @@ module GSR = struct
           | CEqual (TyVar x, t) when not @@ TV.mem x (ftv_ty t) ->
             let s = unify @@ subst_constraints x t c in
             (x, t) :: s
-
           | CEqual (TyDyn,TyDyn) -> unify c (*add*)
           | CEqual (TyDyn,TyVar x) -> unify @@ CEqual(TyVar x,TyDyn)::c
           | CEqual (TyVar x,TyDyn) ->
@@ -287,8 +290,8 @@ module GSR = struct
   let closure_tyvars1 u1 env v1 =
     TV.elements @@ TV.diff (ftv_ty u1) @@ TV.union (ftv_tyenv env) (ftv_exp v1)
 
-  (* let closure_tyvars_let_decl e u1 env =
-    TV.elements @@ TV.diff (TV.union (tv_exp e) (ftv_ty u1)) (ftv_tyenv env) *)
+  let closure_tyvars_let_decl e u1 env =
+    TV.elements @@ TV.diff (TV.union (tv_exp e) (ftv_ty u1)) (ftv_tyenv env)
 
   let closure_tyvars2 w1 env u1 v1 =
     let ftvs = TV.big_union [ftv_tyenv env; ftv_ty u1; ftv_exp v1] in
@@ -327,7 +330,6 @@ module GSR = struct
           let u_a = b in
           let u_2, u_b, c = generate_constraints (Environment.add x (tysc_of_ty u_1) env) e u_g in
           TyFun (u_1, u_b, u_2, u_g), u_a, c
-
         | App (_, e1, e2) ->
           let u_d = b in
           let u_1, u_g, c1 = generate_constraints env e1 u_d in
@@ -567,6 +569,61 @@ module GSR = struct
         CSR.Fix (r, x, y, u1, u2, u3, u4, CSR.App (r, f', Var(r, y, []))), u, u_b
       else
         raise @@ Type_fatal_error "fix not consistent"
+
+  let reset_set = function
+    | Exp e ->
+      let r = Syntax.GSR.range_of_exp e in
+      Exp (Reset (r, e, fresh_tyvar ()))
+    | LetDecl (_, _) as e ->
+      e
+    | _ -> raise @@ Type_fatal_error ""
+
+  let generate_constraints_program env e u_b = match e with
+    | Exp e ->
+      generate_constraints env e u_b
+    | LetDecl (_, e) ->
+      generate_constraints env e u_b
+    | _ -> raise @@ Type_fatal_error ""
+
+  let subst_program env e u u_a u_b s = match e with
+    | Exp e ->
+      let e = subst_exp_substitutions e s in
+      let u = subst_type_substitutions u s in
+      let u_a = subst_type_substitutions u_a s in
+      let u_b = subst_type_substitutions u_b s in
+      let env = subst_env_substitutions env s in
+      env, Exp e, u, u_a, u_b
+    | LetDecl (x, e) ->
+      let e = subst_exp_substitutions e s in
+      let u = subst_type_substitutions u s in
+      let u_a = subst_type_substitutions u_a s in
+      let u_b = subst_type_substitutions u_b s in
+      let env = subst_env_substitutions env s in
+      if u_a <> u_b then begin
+        raise @@ Type_error "LetDecl must be pure."
+      end;
+      let zs = TV.elements @@ ftv_ty u_b in
+      let xs = if is_pure e then zs @ closure_tyvars_let_decl e u env else zs in  (* OK? *)
+      let env = Environment.add x (TyScheme (xs, u)) env in
+      env, LetDecl (x, e), u, u_a, u_b
+    | _ -> raise @@ Type_fatal_error ""
+
+  let translate_program env e u_b = match e with
+    | Exp e ->
+      let f, u, u_a = translate env e u_b in
+      env, CSR.Exp f, u, u_a
+    | LetDecl (x, e) when is_pure e ->
+      let f, u, u_a = translate env e u_b in
+      let xs = closure_tyvars_let_decl e u env in
+      let ys = closure_tyvars2 f env u e in
+      let zs = TV.elements (ftv_ty u_b) in
+      let env = Environment.add x (TyScheme (xs @ ys @ zs, u)) env in
+      env, CSR.LetDecl (x, xs @ ys, f), u, u_a
+    | LetDecl (x, e) ->
+      let f, u, u_a = translate env e u_b in
+      (* env, CSR.LetDecl (x, TV.elements @@ ftv_ty u_b, f), u, u_a *)
+      env, CSR.LetDecl (x, [], f), u, u_a
+    | _ -> raise @@ Type_fatal_error ""
 end
 
 (* When you're sure that this tyarg does not contain ν
@@ -683,4 +740,10 @@ module CSR = struct
         u, ub
       else
         raise @@ Type_fatal_error "fix"
-end
+
+  let type_of_program env e u_b = match e with
+    | Exp e ->
+      type_of_exp env e u_b
+    | LetDecl (_, _, e) ->
+      type_of_exp env e u_b
+  end

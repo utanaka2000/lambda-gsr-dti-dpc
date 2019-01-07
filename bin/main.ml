@@ -31,60 +31,51 @@ let rec read_eval_print lexbuf env tyenv dirs =
   begin try
       let e = Parser.toplevel Lexer.main lexbuf in
       begin match e with
-        | Syntax.GSR.Exp e ->
+        | Syntax.GSR.Exp _
+        | Syntax.GSR.LetDecl _ as e ->
           (* Inference *)
           let u_b = Typing.GSR.fresh_tyvar () in
-          let r = Syntax.GSR.range_of_exp e in
-          let e = Syntax.GSR.Reset(r, e, Typing.GSR.fresh_tyvar()) in (* add *)
+          let e = Typing.GSR.reset_set e in
           print_debug "***** Typing *****\n e: %a\n Uβ: %a\n"
-            Pp.GSR.pp_print_exp e
+            Pp.GSR.pp_program e
             Pp.pp_print_type u_b;
           (* Constraints generation *)
-          let u, u_a, c = Typing.GSR.generate_constraints tyenv e u_b in
+          let u, u_a, c = Typing.GSR.generate_constraints_program tyenv e u_b in
           print_debug "Constraints: %a\n" Pp.pp_print_constraints c;
           let s = Typing.GSR.unify c in
           print_debug "Substitutions: %a\n" Pp.pp_print_substitutions s;
-          let e = Typing.subst_exp_substitutions e s in
-          let u = Typing.subst_type_substitutions u s in
-          let u_a = Typing.subst_type_substitutions u_a s in
-          let u_b = Typing.subst_type_substitutions u_b s in
-          (* let _, e, u = Typing.GSR.normalize tyenv  e u in (* ??? *) *)
+          let tyenv, e, u, u_a, u_b = Typing.GSR.subst_program tyenv e u u_a u_b s in
           print_debug "After Substitution:\n";
-          print_debug " e: %a\n" Pp.GSR.pp_print_exp e;
+          print_debug " e: %a\n" Pp.GSR.pp_program e;
           print_debug " U: %a\n" Pp.pp_print_type u;
           print_debug " Uα: %a\n" Pp.pp_print_type u_a;
           print_debug " Uβ: %a\n" Pp.pp_print_type u_b;
-          (* print_debug "GSR:\n e: %a\n U: %a\n Uα: %a\n Uβ: %a\n"
-             Pp.GSR.pp_print_exp e
-             Pp.pp_print_type u
-             Pp.pp_print_type u_a
-             Pp.pp_print_type u_b; *)
           if u_a <> u_b then begin
             print "Warning: This expression is not pure.\n";
             print "Answer types are %a and %a.\n"
               Pp.pp_print_type u_a
               Pp.pp_print_type u_b
           end;
-          (* Translation *)
-          let f, u', u_a' = Typing.GSR.translate tyenv e u_b in
+          let tyenv, f, u', u_a' = Typing.GSR.translate_program tyenv e u_b in
           (* Translation must not change types *)
           assert (u = u');
           assert (u_a = u_a');
-          let u'', u_a'' = Typing.CSR.type_of_exp tyenv f u_b in
+          let u'', u_a'' = Typing.CSR.type_of_program tyenv f u_b in
           assert (u' = u'');
           assert (u_a' = u_a'');
           print_debug "***** Cast-insertion *****\n f: %a\n U: %a\n Uα: %a\n Uβ: %a\n"
-            Pp.CSR.pp_print_exp f
+            Pp.CSR.pp_program f
             Pp.pp_print_type u'
             Pp.pp_print_type u_a'
             Pp.pp_print_type u_b;
           (* Evaluation *)
           print_debug "***** Eval *****\n";
-          let v = Eval.eval !dirs.debug f env (fun x -> x) in
+          let env, v = Eval.eval_program !dirs.debug f env (fun x -> x) in
           print "- : %a = %a\n"
             Pp.pp_ty2 u'  (* tyvar is printed like 'a *)
             (* Pp.pp_print_type u' *)
             Pp.CSR.pp_print_value v;
+          read_eval_print lexbuf env tyenv !dirs
         | Syntax.GSR.Directive d ->
           begin match d with
             | Syntax.GSR.BoolDir ("debug", b) ->
@@ -116,9 +107,6 @@ let rec read_eval_print lexbuf env tyenv dirs =
       print ("Unification_error: " ^^ message ^^ "\n")
         Pp.pp_print_constr c
     | Eval.Blame (range, polarity) ->
-      (* print "Blame: %a => %s\n%a\n"
-        Pp.CSR.pp_print_value value message
-         Utils.Error.pp_range range *)
       begin match polarity with
       | Pos -> print "Blame on the expression side:\n%a\n" Utils.Error.pp_range range
       | Neg -> print "Blame on the environment side:\n%a\n" Utils.Error.pp_range range

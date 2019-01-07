@@ -247,3 +247,11 @@ and cast debug r v u1 u2 p = (* v: u1 => u2 *)
 and castk debug r k (u12, u13) (u22, u23) p = fun v ->
   let v' = cast debug r v u22 u12 (neg p) in
   cast debug r (k v') u13 u23 p
+
+let eval_program debug e env cont = match e with
+  | Exp f ->
+    env, eval debug f env cont
+  | LetDecl (x, xs, f) ->
+    let v = eval debug f env cont in
+    let env = Environment.add x (xs, v) env in
+    env, v

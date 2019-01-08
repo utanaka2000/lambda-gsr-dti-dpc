@@ -139,7 +139,7 @@ let subst_type2 (s: (tyvar * ty) list) (u: ty) =
 let subst_env_substitutions env s =
   let tv_to_ty xs = List.map (fun x -> TyVar x) xs in
   let ty_to_tv ys = List.map
-      (function (TyVar (x, y)) -> (x, y) | _ -> raise @@ Type_error "") ys in
+      (function (TyVar (x, y)) -> (x, y) | _ -> raise @@ Type_error "ty_to_tv") ys in
   let f = fun (TyScheme(xs, u)) ->
     (TyScheme (ty_to_tv (List.map (subst_type2 s) (tv_to_ty xs)), subst_type2 s u)) in
   Environment.map f env

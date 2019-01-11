@@ -160,7 +160,7 @@ module GSR = struct
     | Pure (_, e) ->
       fprintf ppf "pure( %a )"
         pp_print_exp e
-    | Let (_, id, e1, e2) ->
+    | Let (_, _, id, e1, e2) ->
       fprintf ppf "let %s = %a in %a"
         id
         pp_print_exp e1

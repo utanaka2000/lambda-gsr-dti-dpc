@@ -51,7 +51,7 @@ rule main = parse
 | "=" { Parser.EQUAL (range_of lexbuf) }
 | ">" { Parser.GT (range_of lexbuf) }
 | "<" { Parser.LT (range_of lexbuf) }
-
+| "'" { Parser.QUOTE (range_of lexbuf) }
 | ['a'-'z'] ['a'-'z' '0'-'9' '_' '\'']*
   {
     let id = Lexing.lexeme lexbuf in

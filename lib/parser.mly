@@ -3,13 +3,22 @@ open Syntax
 open GSR
 open Utils.Error
 
+let tyvenv = ref Environment.empty
+
+(* tyvenv -> TV *)
+(* for assembling type variable appearing in annotation *)
+let ftv_v tyvenv =
+  let l = Environment.bindings tyvenv in
+  let l' = List.map (fun (_, ty) -> ftv_ty ty) l in
+  TV.big_union l'
+
 %}
 
 %token <Utils.Error.range> LPAREN RPAREN SEMI SEMISEMI COLON SLASH CARET SHARP
 %token <Utils.Error.range> PLUS MINUS STAR QUESTION
 %token <Utils.Error.range> FUN RARROW TRUE FALSE INT BOOL UNIT SHIFT RESET
 %token <Utils.Error.range> IF THEN ELSE PURE
-%token <Utils.Error.range> EQUAL GT LT LET IN REC
+%token <Utils.Error.range> EQUAL GT LT LET IN REC QUOTE
 
 %token <int Utils.Error.with_range> INTV
 %token <Syntax.id Utils.Error.with_range> ID
@@ -25,16 +34,21 @@ open Utils.Error
 %left  STAR SLASH
 
 %%
-
 toplevel :
+  | p=Program {
+      tyvenv := Environment.empty;
+      p
+    }
+
+Program :
   | Expr SEMISEMI { Exp $1 }
   | SHARP Directive SEMISEMI { Directive $2 }
   | LET id=ID EQUAL e=Expr SEMISEMI { LetDecl (id.value, e) }
 
 Expr :
-  | start=LET id=ID EQUAL e1=Expr IN e2=Expr {
+  | start=LET id=ID EQUAL e1=Expr v=INV e2=Expr {
       let r = join_range start (range_of_exp e2) in
-      Let(r, id.value, e1, e2)}  (* ? *)
+      Let(r, ftv_v v, id.value, e1, e2)}  (* ? *)
   | start=FUN u=OptionalAnswerTypeAnnot id=ID RARROW e=Expr {
       let r = join_range start (range_of_exp e) in
       Fun (r, u, id.value, Typing.GSR.fresh_tyvar (), e) }
@@ -54,18 +68,18 @@ Expr :
       let r = join_range start (range_of_exp e) in
       Pure (r, e) }
   (* let rec x (y:u1) (^u2) :u3 ^u4 = e1 in e2 *)
-  | start=LET REC x=ID y=ID LPAREN CARET u2=Type RPAREN u3=OptionalParamTypeAnnot u4=OptionalAnswerTypeAnnot EQUAL e1=Expr IN e2=Expr {
+  | start=LET REC x=ID y=ID LPAREN CARET u2=Type RPAREN u3=OptionalParamTypeAnnot u4=OptionalAnswerTypeAnnot EQUAL e1=Expr v=INV e2=Expr {
       let r = join_range start (range_of_exp e2) in
-      Let (r, x.value, Fix (r, x.value, y.value, Typing.GSR.fresh_tyvar (), u2, u3, u4, e1), e2) }
-  | start=LET REC x=ID y=ID u3=OptionalParamTypeAnnot u4=OptionalAnswerTypeAnnot EQUAL e1=Expr IN e2=Expr {
+      Let (r, ftv_v v, x.value, Fix (r, x.value, y.value, Typing.GSR.fresh_tyvar (), u2, u3, u4, e1), e2) }
+  | start=LET REC x=ID y=ID u3=OptionalParamTypeAnnot u4=OptionalAnswerTypeAnnot EQUAL e1=Expr v=INV e2=Expr {
       let r = join_range start (range_of_exp e2) in
-      Let (r, x.value, Fix (r, x.value, y.value, Typing.GSR.fresh_tyvar (), Typing.GSR.fresh_tyvar (), u3, u4, e1), e2) }
-  | start=LET REC x=ID LPAREN y=ID COLON u1=Type RPAREN LPAREN CARET u2=Type RPAREN u3=OptionalParamTypeAnnot u4=OptionalAnswerTypeAnnot EQUAL e1=Expr IN e2=Expr {
+      Let (r, ftv_v v, x.value, Fix (r, x.value, y.value, Typing.GSR.fresh_tyvar (), Typing.GSR.fresh_tyvar (), u3, u4, e1), e2) }
+  | start=LET REC x=ID LPAREN y=ID COLON u1=Type RPAREN LPAREN CARET u2=Type RPAREN u3=OptionalParamTypeAnnot u4=OptionalAnswerTypeAnnot EQUAL e1=Expr v=INV e2=Expr {
       let r = join_range start (range_of_exp e2) in
-      Let (r, x.value, Fix (r, x.value, y.value, u1, u2, u3, u4, e1), e2) }
-  | start=LET REC x=ID LPAREN y=ID COLON u1=Type RPAREN u3=OptionalParamTypeAnnot u4=OptionalAnswerTypeAnnot EQUAL e1=Expr IN e2=Expr {
+      Let (r, ftv_v v, x.value, Fix (r, x.value, y.value, u1, u2, u3, u4, e1), e2) }
+  | start=LET REC x=ID LPAREN y=ID COLON u1=Type RPAREN u3=OptionalParamTypeAnnot u4=OptionalAnswerTypeAnnot EQUAL e1=Expr v=INV e2=Expr {
       let r = join_range start (range_of_exp e2) in
-      Let (r, x.value, Fix (r, x.value, y.value, u1, Typing.GSR.fresh_tyvar(), u3, u4, e1), e2) }
+      Let (r, ftv_v v, x.value, Fix (r, x.value, y.value, u1, Typing.GSR.fresh_tyvar(), u3, u4, e1), e2) }
   | Consq_expr { $1 }
 
 Consq_expr :
@@ -92,7 +106,7 @@ Consq_expr :
 App_expr :
   | e1=App_expr e2=SimpleExpr {
     let r = join_range (range_of_exp e1) (range_of_exp e2) in
-    App (r, e1, e2) }
+    (App (r, e1, e2)) }
   | SimpleExpr { $1 }
 
 SimpleExpr :
@@ -114,6 +128,17 @@ AType :
   | BOOL { TyBase TyBool }
   | UNIT { TyBase TyUnit }
   | QUESTION { TyDyn }
+  | QUOTE x=ID {
+      try
+        Environment.find x.value !tyvenv
+      with Not_found ->
+        let u = Typing.GSR.fresh_tyvar () in
+        tyvenv := Environment.add x.value u !tyvenv;
+        u
+    }
+
+INV :
+  | IN {!tyvenv}
 
 OptionalAnswerTypeAnnot :
   | { Typing.GSR.fresh_tyvar () }

@@ -1,6 +1,7 @@
 open Constraints
 open Syntax
 
+
 (* Fatal errors *)
 exception Type_fatal_error of string
 
@@ -164,6 +165,26 @@ module GSR = struct
       TyVar (v + 1, {contents = None})
     in body
 
+  let let_macro e =
+    let rec let_macro e = match e with
+    | Var _
+    | Const _ -> e
+    | BinOp (r, op, e1, e2) -> BinOp (r, op, let_macro e1, let_macro e2)
+    | If (r, e1, e2, e3) -> If (r, let_macro e1, let_macro e2, let_macro e3)
+    | Fun (r, g, x1, x1_t, e) -> Fun (r, g, x1, x1_t, let_macro e)
+    | App (r, e1, e2) -> App (r, let_macro e1, let_macro e2)
+    | Let (r, v, id, e1, e2) when is_pure e1 -> Let (r, v, id, let_macro e1, let_macro e2)
+    | Let (r, _, id, e1, e2) -> App (r, Fun (r, fresh_tyvar (), id, fresh_tyvar (), let_macro e2), let_macro e1)
+    | Shift (r, k, k_t, e) -> Shift (r, k, k_t, let_macro e)
+    | Reset (r, e, u) -> Reset (r, let_macro e, u)
+    | Pure (r, e) -> Pure (r, let_macro e)
+    | Consq (r, e1, e2) -> Consq (r, let_macro e1, let_macro e2)
+    | Fix (r, g, x, u1, u2, u3, u4, e) -> Fix (r, g, x, u1, u2, u3, u4, let_macro e)
+    in match e with
+    | Exp e -> Exp (let_macro e)
+    | LetDecl (id, e) -> LetDecl (id, let_macro e)
+    | _ -> raise @@ Type_error "let_macro"
+    
   let fresh_tyfun = TyFun(fresh_tyvar (), fresh_tyvar (), fresh_tyvar (), fresh_tyvar ())
 
   (* Type Inference *)
@@ -288,13 +309,13 @@ module GSR = struct
   (* Utility functions for let polymorpism *)
 
   let closure_tyvars1 u1 env v1 =
-    TV.elements @@ TV.diff (ftv_ty u1) @@ TV.union (ftv_tyenv env) (ftv_exp v1)
+    TV.elements @@ TV.diff (ftv_ty u1) @@ TV.union (ftv_tyenv env) v1
 
   let closure_tyvars_let_decl e u1 env =
     TV.elements @@ TV.diff (TV.union (tv_exp e) (ftv_ty u1)) (ftv_tyenv env)
 
   let closure_tyvars2 w1 env u1 v1 =
-    let ftvs = TV.big_union [ftv_tyenv env; ftv_ty u1; ftv_exp v1] in
+    let ftvs = TV.big_union [ftv_tyenv env; ftv_ty u1; v1] in
     TV.elements @@ TV.diff (Syntax.CSR.ftv_exp w1) ftvs
 
   let generate_constraints env e b =
@@ -398,15 +419,15 @@ module GSR = struct
             a, u_b, c1
           else
             raise @@ Type_error (Printf.sprintf "pure error")
-        | Let (r, id, e1, e2) ->
+        | Let (r, v, id, e1, e2) ->
           let u_b = b in
           let u1, _, c1 = generate_constraints env e1 (fresh_tyvar ()) in
           if is_pure e1 then
             let unify = unify c1 in
             let u1 = subst_type_substitutions u1 unify in
             (* let env = subst_env_substitutions env unify in *) (* problem *)
-            let e1 = subst_exp_substitutions e1 unify in
-            let xs = closure_tyvars1 u1 env e1 in
+            let _ = subst_exp_substitutions e1 unify in
+            let xs = closure_tyvars1 u1 env v in
             let us1 = TyScheme (xs,u1) in
             let a, _, c2 = generate_constraints (Environment.add id us1 env) e2 u_b in
             let c = Constraints.union c1 c2 in
@@ -544,17 +565,17 @@ module GSR = struct
         (CSR.Pure (r, a, f)), a, u_b'
       else
         raise @@ Type_fatal_error "pure: not consistent"
-    | Let (r, x, e1, e2) when is_pure  e1 ->
+    | Let (r, v, x, e1, e2) when is_pure  e1 ->
       let alpha = fresh_tyvar () in  (* answer type polymorphism *)
       let f1, u1, _ = translate env e1 alpha in
-      let xs = closure_tyvars1 u1 env e1 in
-      let ys = closure_tyvars2 f1 env u1 e1 in
+      let xs = closure_tyvars1 u1 env v in
+      let ys = closure_tyvars2 f1 env u1 v in
       let zs = TV.elements((ftv_ty alpha)) in
       let xys = xs @ (ys @ zs) in
       let us1 = TyScheme (xys, u1) in
       let f2, u2, u_a = translate (Environment.add x us1 env) e2 u_b in
       CSR.Let (r, x, xys, f1, f2), u2, u_a
-    | Let (r, x, e1, e2) ->
+    | Let (r, _, x, e1, e2) ->
       let _, u1, _ = translate env e1 u_b in
       let e = App (r, Fun (r, u_b, x, u1, e2), e1) in
       translate env e u_b
@@ -615,7 +636,7 @@ module GSR = struct
     | LetDecl (x, e) when is_pure e ->
       let f, u, u_a = translate env e u_b in
       let xs = closure_tyvars_let_decl e u env in
-      let ys = closure_tyvars2 f env u e in
+      let ys = closure_tyvars2 f env u TV.empty in  (*temp*)
       let zs = TV.elements (ftv_ty u_b) in
       let env = Environment.add x (TyScheme (xs @ ys @ zs, u)) env in
       env, CSR.LetDecl (x, xs @ ys, f), u, u_a

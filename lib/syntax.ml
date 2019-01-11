@@ -81,7 +81,7 @@ module GSR = struct
     | If of range * exp * exp * exp
     | Consq of range * exp * exp
     | Pure of range * exp
-    | Let of range * id * exp * exp
+    | Let of range * TV.t * id * exp * exp
     | Fix of range * id * id * ty * ty * ty * ty * exp
 
   let range_of_exp = function
@@ -95,7 +95,7 @@ module GSR = struct
     | If (r, _, _, _)
     | Consq (r, _, _)
     | Pure (r, _)
-    | Let (r, _, _, _)
+    | Let (r, _, _, _, _)
     | Fix (r, _, _, _, _, _, _, _) -> r
 
   type directive =
@@ -118,7 +118,7 @@ module GSR = struct
     | If (r, e1, e2, e3) -> If (r, f_exp e1, f_exp e2, f_exp e3)
     | Consq (r, e1, e2) -> Consq (r, f_exp e1, f_exp e2)
     | Pure (r, e) -> Pure (r, f_exp e)
-    | Let (r, id,e1,e2) -> Let (r, id, f_exp e1,f_exp e2)
+    | Let (r, v, id,e1,e2) -> Let (r, v, id, f_exp e1,f_exp e2)
     | Fix (r, x, y, u1, u2, u3, u4, e) -> Fix (r, x, y, f_ty u1, f_ty u2, f_ty u3, f_ty u4, f_exp e)
 
   let rec tv_exp: exp -> TV.t = function
@@ -128,7 +128,7 @@ module GSR = struct
     | If (_,  e1, e2, e3) -> TV.big_union @@ List.map tv_exp [e1; e2; e3]
     | Fun (_, g, _, x1_t, e) -> TV.big_union @@ [ftv_ty x1_t; tv_exp e; ftv_ty g]
     | App (_, e1, e2) -> TV.union (tv_exp e1) (tv_exp e2)
-    | Let (_, _, e1, e2) -> TV.union (tv_exp e1) (tv_exp e2)
+    | Let (_, _, _, e1, e2) -> TV.union (tv_exp e1) (tv_exp e2)
     | Shift (_, _, k_t, e) -> TV.union (ftv_ty k_t) (tv_exp e)
     | Reset (_, e, u) -> TV.union (ftv_ty u) (tv_exp e)
     | Pure (_, e) -> tv_exp e
@@ -142,7 +142,7 @@ module GSR = struct
     | If (_, e1, e2, e3) -> TV.big_union @@ List.map ftv_exp [e1; e2; e3]
     | Fun (_, _, _, _, e) -> ftv_exp e
     | App (_, e1, e2) -> TV.union (ftv_exp e1) (ftv_exp e2)
-    | Let (_, _, e1, e2) -> TV.union (ftv_exp e1) (ftv_exp e2)
+    | Let (_, _, _, e1, e2) -> TV.union (ftv_exp e1) (ftv_exp e2)
     | Shift (_, _, _, e) -> ftv_exp e
     | Reset (_, e, _) -> ftv_exp e
     | Pure (_, e) -> ftv_exp e

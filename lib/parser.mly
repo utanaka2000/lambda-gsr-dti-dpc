@@ -22,7 +22,6 @@ let insert_asc e u = match u with
   | None -> e
   | Some u -> Asc (range_of_exp e, e, u)
 
-
 %}
 
 %token <Utils.Error.range> LPAREN RPAREN SEMI SEMISEMI COLON SLASH CARET SHARP
@@ -64,7 +63,6 @@ Program :
       let y, u1 = y in
       LetDecl (x.value, Fix (r, x.value, y.value, u1, u2, u3, u4, e))
   }
-
 
 Expr :
   | start=LET id=ID params=list(Param) u1=Opt_type_annot EQUAL e1=Expr v=INV e2=Expr {
@@ -108,6 +106,7 @@ Consq_expr :
       let r = join_range (range_of_exp e1) (range_of_exp e2) in
       BinOp (r, op, e1, e2) }
   | App_expr { $1 }
+  | Unary_expr { $1 }
 
 %inline Op :
   | EQUAL { Equal }
@@ -123,6 +122,15 @@ App_expr :
     let r = join_range (range_of_exp e1) (range_of_exp e2) in
     (App (r, e1, e2)) }
   | SimpleExpr { $1 }
+
+Unary_expr :
+  | PLUS e=Unary_expr { e }
+  | start_r=MINUS e=Unary_expr {
+      let r = join_range start_r (range_of_exp e) in
+      let zero = Const (dummy_range, ConstInt 0) in
+      BinOp (r, Minus, zero, e)
+    }
+  | App_expr { $1 }
 
 SimpleExpr :
   | i=INTV { Const (i.range, ConstInt i.value) }

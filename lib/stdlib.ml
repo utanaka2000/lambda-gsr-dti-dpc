@@ -13,3 +13,5 @@ let tyenv =
   List.fold_right
     (fun (x, u, _) tyenv -> Environment.add x u tyenv)
     pervasive Environment.empty
+
+let pervasives = Environment.empty, Environment.empty

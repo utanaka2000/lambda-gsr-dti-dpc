@@ -83,6 +83,7 @@ module GSR = struct
     | Pure of range * exp
     | Let of range * TV.t * id * exp * exp
     | Fix of range * id * id * ty * ty * ty * ty * exp
+    | Asc of range * exp * ty
 
   let range_of_exp = function
     | Var (r, _, _)
@@ -96,7 +97,8 @@ module GSR = struct
     | Consq (r, _, _)
     | Pure (r, _)
     | Let (r, _, _, _, _)
-    | Fix (r, _, _, _, _, _, _, _) -> r
+    | Fix (r, _, _, _, _, _, _, _)
+    | Asc (r, _, _) -> r
 
   type directive =
     | BoolDir of string * bool
@@ -120,6 +122,7 @@ module GSR = struct
     | Pure (r, e) -> Pure (r, f_exp e)
     | Let (r, v, id,e1,e2) -> Let (r, v, id, f_exp e1,f_exp e2)
     | Fix (r, x, y, u1, u2, u3, u4, e) -> Fix (r, x, y, f_ty u1, f_ty u2, f_ty u3, f_ty u4, f_exp e)
+    | Asc (r, e, t) -> Asc(r, f_exp e, f_ty t)
 
   let rec tv_exp: exp -> TV.t = function
     | Var _
@@ -134,6 +137,7 @@ module GSR = struct
     | Pure (_, e) -> tv_exp e
     | Consq (_, e1, e2) -> TV.union (tv_exp e1) (tv_exp e2)
     | Fix (_, _, _, u1, u2, u3, u4, e) -> TV.big_union @@ [ftv_ty u1; ftv_ty u2; ftv_ty u3; ftv_ty u4; tv_exp e]
+    | Asc (_, e, t) -> TV.union (tv_exp e) (ftv_ty t)
 
   let rec ftv_exp: exp -> TV.t = function
     | Var _
@@ -148,6 +152,7 @@ module GSR = struct
     | Pure (_, e) -> ftv_exp e
     | Consq (_, e1, e2) -> TV.union (ftv_exp e1) (ftv_exp e2)
     | Fix (_, _, _, _, _, _, _, e) -> ftv_exp e
+    | Asc (_, e, _) -> ftv_exp e
 end
 
 module CSR = struct

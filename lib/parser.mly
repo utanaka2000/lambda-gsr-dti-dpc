@@ -116,7 +116,8 @@ SimpleExpr :
   | r=LPAREN RPAREN { Const (r, ConstUnit) }
   | x=ID { Var (x.range, x.value, ref []) }
   | LPAREN Expr RPAREN { $2 }
-
+  | start=LPAREN e=Expr COLON u=Type last=RPAREN {
+      Asc (join_range start last, e, u)}
 
 Type :
   | AType SLASH AType RARROW AType SLASH AType  { TyFun ($1, $3, $5, $7) }

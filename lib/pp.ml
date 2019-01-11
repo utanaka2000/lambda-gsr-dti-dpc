@@ -174,7 +174,10 @@ module GSR = struct
         pp_print_type u3
         pp_print_answer_type_annot u4
         pp_print_exp e
-
+    | Asc (_, e, ty) ->
+      fprintf ppf "(%a : %a)"
+        pp_print_exp e
+        pp_print_type ty
     let pp_program ppf = function
       | Exp e -> pp_print_exp ppf e
       | LetDecl (x, e) ->

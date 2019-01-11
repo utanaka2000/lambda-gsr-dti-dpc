@@ -148,13 +148,14 @@ let subst_env_substitutions env s =
 module GSR = struct
   open Syntax.GSR
 
-  let is_pure = function
+  let rec is_pure = function (* Asc? *)
     | Var _ -> true
     | Const _ -> true
     | Fun _  -> true
     | Reset _ -> true
     | Pure _ -> true
     | Fix _ -> true
+    | Asc (_, e, _) -> is_pure e
     | _ -> false
 
   let fresh_tyvar =
@@ -180,11 +181,12 @@ module GSR = struct
     | Pure (r, e) -> Pure (r, let_macro e)
     | Consq (r, e1, e2) -> Consq (r, let_macro e1, let_macro e2)
     | Fix (r, g, x, u1, u2, u3, u4, e) -> Fix (r, g, x, u1, u2, u3, u4, let_macro e)
+    | Asc (r, e, ty) -> Asc (r, let_macro e, ty)
     in match e with
     | Exp e -> Exp (let_macro e)
     | LetDecl (id, e) -> LetDecl (id, let_macro e)
     | _ -> raise @@ Type_error "let_macro"
-    
+
   let fresh_tyfun = TyFun(fresh_tyvar (), fresh_tyvar (), fresh_tyvar (), fresh_tyvar ())
 
   (* Type Inference *)
@@ -443,6 +445,12 @@ module GSR = struct
             @@ (Constraints.add (CConsistent (u2, u2'))
             @@ Constraints.singleton (CConsistent (u3, u3'))) in
           u, u_b, c
+        | Asc (_, e, ty) ->
+          let u_b = b in
+          let u, u_a, c1 = generate_constraints env e u_b in
+          let c = Constraints.union c1
+            @@ Constraints.singleton (CConsistent (u, ty)) in
+          ty, u_a, c
       in
       t, a, c
     in
@@ -590,6 +598,12 @@ module GSR = struct
         CSR.Fix (r, x, y, u1, u2, u3, u4, CSR.App (r, f', Var(r, y, []))), u, u_b
       else
         raise @@ Type_fatal_error "fix not consistent"
+    | Asc (_, e, ty) ->
+      let  f, u, u_a = translate env e u_b in
+      if is_consistent u ty then
+        cast f u ty, ty, u_a
+      else
+        raise @@ Type_fatal_error "Asc not consistent"
 
   let reset_set = function
     | Exp e ->

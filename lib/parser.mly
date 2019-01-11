@@ -12,6 +12,17 @@ let ftv_v tyvenv =
   let l' = List.map (fun (_, ty) -> ftv_ty ty) l in
   TV.big_union l'
 
+let param_to_fun r (x, u1, u2) e = match (u1, u2) with
+  | (None, None) -> Fun (r, Typing.GSR.fresh_tyvar (), x.value, Typing.GSR.fresh_tyvar (), e)
+  | (Some u1, None) -> Fun (r, u1, x.value, Typing.GSR.fresh_tyvar (), e)
+  | (None, Some u2) -> Fun (r, Typing.GSR.fresh_tyvar (), x.value, u2, e)
+  | (Some u1, Some u2) -> Fun (r, u1, x.value, u2, e)
+
+let insert_asc e u = match u with
+  | None -> e
+  | Some u -> Asc (range_of_exp e, e, u)
+
+
 %}
 
 %token <Utils.Error.range> LPAREN RPAREN SEMI SEMISEMI COLON SLASH CARET SHARP
@@ -43,18 +54,29 @@ toplevel :
 Program :
   | Expr SEMISEMI { Exp $1 }
   | SHARP Directive SEMISEMI { Directive $2 }
-  | LET id=ID EQUAL e=Expr SEMISEMI { LetDecl (id.value, e) }
+  | start=LET id=ID params=list(Param) u=Opt_type_annot EQUAL e=Expr SEMISEMI {
+      let r = join_range start (range_of_exp e) in
+      let e = insert_asc e u in
+      let e = List.fold_right (param_to_fun r) params e in
+      LetDecl (id.value, e) }
+  | start=LET REC x=ID y=Opt_fix_u1_annot u2=Opt_fix_u2_annot u3=Opt_fix_u3_annot u4=Opt_fix_u4_annot EQUAL e=Expr SEMISEMI {
+      let r = join_range start (range_of_exp e) in
+      let y, u1 = y in
+      LetDecl (x.value, Fix (r, x.value, y.value, u1, u2, u3, u4, e))
+  }
+
 
 Expr :
-  | start=LET id=ID EQUAL e1=Expr v=INV e2=Expr {
+  | start=LET id=ID params=list(Param) u1=Opt_type_annot EQUAL e1=Expr v=INV e2=Expr {
       let r = join_range start (range_of_exp e2) in
+      let e1 = insert_asc e1 u1 in
+      let e1 = List.fold_right (param_to_fun r) params e1 in
       Let(r, ftv_v v, id.value, e1, e2)}  (* ? *)
-  | start=FUN u=OptionalAnswerTypeAnnot id=ID RARROW e=Expr {
+  | start=FUN params=nonempty_list(Param) u=Opt_simple_type_annot RARROW e=Expr {
       let r = join_range start (range_of_exp e) in
-      Fun (r, u, id.value, Typing.GSR.fresh_tyvar (), e) }
-  | start=FUN u1=OptionalAnswerTypeAnnot LPAREN id=ID COLON u2=Type RPAREN RARROW e=Expr {
-      let r = join_range start (range_of_exp e) in
-      Fun (r, u1, id.value, u2, e) }
+      let e = insert_asc e u in
+      List.fold_right (param_to_fun r) params e
+  }
   | start=RESET u=OptionalAnswerTypeAnnot e=Expr {
       let r = join_range start (range_of_exp e) in
       Reset (r, e, u) }
@@ -68,18 +90,11 @@ Expr :
       let r = join_range start (range_of_exp e) in
       Pure (r, e) }
   (* let rec x (y:u1) (^u2) :u3 ^u4 = e1 in e2 *)
-  | start=LET REC x=ID y=ID LPAREN CARET u2=Type RPAREN u3=OptionalParamTypeAnnot u4=OptionalAnswerTypeAnnot EQUAL e1=Expr v=INV e2=Expr {
+  | start=LET REC x=ID y=Opt_fix_u1_annot u2=Opt_fix_u2_annot u3=Opt_fix_u3_annot u4=Opt_fix_u4_annot EQUAL e1=Expr v=INV e2=Expr {
       let r = join_range start (range_of_exp e2) in
-      Let (r, ftv_v v, x.value, Fix (r, x.value, y.value, Typing.GSR.fresh_tyvar (), u2, u3, u4, e1), e2) }
-  | start=LET REC x=ID y=ID u3=OptionalParamTypeAnnot u4=OptionalAnswerTypeAnnot EQUAL e1=Expr v=INV e2=Expr {
-      let r = join_range start (range_of_exp e2) in
-      Let (r, ftv_v v, x.value, Fix (r, x.value, y.value, Typing.GSR.fresh_tyvar (), Typing.GSR.fresh_tyvar (), u3, u4, e1), e2) }
-  | start=LET REC x=ID LPAREN y=ID COLON u1=Type RPAREN LPAREN CARET u2=Type RPAREN u3=OptionalParamTypeAnnot u4=OptionalAnswerTypeAnnot EQUAL e1=Expr v=INV e2=Expr {
-      let r = join_range start (range_of_exp e2) in
-      Let (r, ftv_v v, x.value, Fix (r, x.value, y.value, u1, u2, u3, u4, e1), e2) }
-  | start=LET REC x=ID LPAREN y=ID COLON u1=Type RPAREN u3=OptionalParamTypeAnnot u4=OptionalAnswerTypeAnnot EQUAL e1=Expr v=INV e2=Expr {
-      let r = join_range start (range_of_exp e2) in
-      Let (r, ftv_v v, x.value, Fix (r, x.value, y.value, u1, Typing.GSR.fresh_tyvar(), u3, u4, e1), e2) }
+      let y, u1 = y in
+      Let (r, ftv_v v, x.value, Fix (r, x.value, y.value, u1, u2, u3, u4, e1), e2)
+  }
   | Consq_expr { $1 }
 
 Consq_expr :
@@ -141,13 +156,39 @@ AType :
 INV :
   | IN {!tyvenv}
 
-OptionalAnswerTypeAnnot :
-  | { Typing.GSR.fresh_tyvar () }
-  | CARET Type { $2 }
+Param :
+  | x=ID {(x, None, None)}
+  | LPAREN x=ID COLON u=Type RPAREN { (x, None, Some u)}
+  | CARET u=Type x=ID  {(x, Some u, None)}
+  | CARET u1=Type LPAREN x=ID COLON u2=Type RPAREN  {(x, Some u1, Some u2)}
 
-OptionalParamTypeAnnot :
-  | { Typing.GSR.fresh_tyvar () }
-  | COLON Type { $2 }
+%inline Opt_type_annot :
+  | /* empty */ { None }
+  | COLON u=Type { Some u }
+
+%inline Opt_simple_type_annot :
+  | /* empty */ { None }
+  | COLON u=AType { Some u }
+
+%inline Opt_fix_u1_annot:
+  | ID { ($1, Typing.GSR.fresh_tyvar ()) }
+  | LPAREN ID COLON Type RPAREN { ($2, $4 ) }
+
+%inline Opt_fix_u2_annot:
+  | /* empty */ { Typing.GSR.fresh_tyvar () }
+  | LPAREN CARET Type RPAREN { $3 }
+
+%inline Opt_fix_u3_annot:
+  | /* empty */ { Typing.GSR.fresh_tyvar ()}
+  | COLON AType { $2 }
+
+%inline Opt_fix_u4_annot:
+  | /* empty */ { Typing.GSR.fresh_tyvar () }
+  | CARET AType { $2 }
+
+%inline OptionalAnswerTypeAnnot :
+  | /* empty */ { Typing.GSR.fresh_tyvar () }
+  | CARET AType { $2 }
 
 Directive :
   | id=ID TRUE { BoolDir (id.value, true) }

@@ -1,7 +1,6 @@
 open Constraints
 open Syntax
 
-
 (* Fatal errors *)
 exception Type_fatal_error of string
 
@@ -140,10 +139,16 @@ let subst_type2 (s: (tyvar * ty) list) (u: ty) =
 let subst_env_substitutions env s =
   let tv_to_ty xs = List.map (fun x -> TyVar x) xs in
   let ty_to_tv ys = List.map
-      (function (TyVar (x, y)) -> (x, y) | _ -> raise @@ Type_error "ty_to_tv") ys in
+      (function (TyVar (x, y)) -> (x, y) | _ -> raise @@ Type_error "subst_env_substitutions") ys in
   let f = fun (TyScheme(xs, u)) ->
     (TyScheme (ty_to_tv (List.map (subst_type2 s) (tv_to_ty xs)), subst_type2 s u)) in
   Environment.map f env
+
+(* S(Tv.t) *)
+let subst_tv_substitutions tv s =
+  let l = TV.elements tv in
+  let l' = List.map (fun tyvar -> ftv_ty (subst_type_substitutions (TyVar tyvar) s)) l in
+  TV.big_union l'
 
 module GSR = struct
   open Syntax.GSR
@@ -192,13 +197,13 @@ module GSR = struct
   (* Type Inference *)
 
   (* domf = *)
-  let generate_constraints_domf_eq = function
+  (* let generate_constraints_domf_eq = function
     | TyVar x ->
       let x1, x2, x3, x4 = fresh_tyvar (), fresh_tyvar (), fresh_tyvar (), fresh_tyvar () in
       x1, Constraints.singleton @@ CEqual ((TyVar x), (TyFun (x1, x2, x3, x4)))
     | TyFun (u1, _, _, _) -> u1, Constraints.empty
     | TyDyn -> TyDyn, Constraints.empty
-    | _ as u -> raise @@ Type_error1 ("failed to generate constraints: domf(%a) is undefined", u)
+    | _ as u -> raise @@ Type_error1 ("failed to generate constraints: domf(%a) is undefined", u) *)
 
   (* domc = *)
   let generate_constraints_domc_eq = function
@@ -219,13 +224,13 @@ module GSR = struct
     | _ as u -> raise @@ Type_error1 ("failed to generate constraints: codc(%a) is undefined", u)
 
   (* codf = *)
-  let generate_constraints_codf_eq = function
+  (* let generate_constraints_codf_eq = function
     | TyVar x ->
       let x1, x2, x3, x4 = fresh_tyvar (), fresh_tyvar (), fresh_tyvar (), fresh_tyvar () in
       x4, Constraints.singleton @@ CEqual ((TyVar x), (TyFun (x1, x2, x3, x4)))
     | TyFun (_, _, _, u4) -> u4, Constraints.empty
     | TyDyn -> TyDyn, Constraints.empty
-    | _ as u -> raise @@ Type_error1 ("failed to generate constraints: codf(%a) is undefined", u)
+    | _ as u -> raise @@ Type_error1 ("failed to generate constraints: codf(%a) is undefined", u) *)
 
   (* domf ~ *)
   let generate_constraints_domf_con u1 u2 = match u1 with
@@ -369,21 +374,27 @@ module GSR = struct
           u, u_a, c
         | Shift (_, k, u_s, e) ->
           let u_b = b in
-          let u_d, u_d', c1 = generate_constraints (Environment.add k (tysc_of_ty u_s) env) e u_b in
-          let u_a, c2 = generate_constraints_domc_eq u_s in
-          let u, c3 = generate_constraints_domf_eq u_s in
-          let u_g1, c4 = generate_constraints_codc_eq u_s in
-          let u_g2, c5 = generate_constraints_codf_eq u_s in
-          let _, c6 = generate_constraints_meet u_g1 u_g2 in
+          let matching u_s = begin match u_s with
+            | TyVar _ ->
+              let u1 = fresh_tyvar () in
+              let u2 = fresh_tyvar () in
+              let u3 = fresh_tyvar () in
+              let u4 = u2 in
+              let u = TyFun (u1, u2, u3, u4) in
+              u, u1, u2, u3, u4, Constraints.singleton @@ (CEqual (u, u_s)), true
+            | TyFun (u1, u2, u3, u4) as u -> u, u1, u2, u3, u4, Constraints.empty, false
+            | TyDyn  -> tyDynFun, TyDyn, TyDyn, TyDyn, TyDyn, Constraints.empty, false
+            | _ -> raise @@ Type_error ("failed to generate constraints: shift\n")
+          end in
+          let u_s, u1, u2, u3, u4, c2, implicit = matching u_s in
+          let tysc = begin match (u2, implicit) with (TyVar xs, true) -> TyScheme ([xs], u_s) | _ -> tysc_of_ty u_s end in
+          let u_d, u_d', c1 = generate_constraints (Environment.add k tysc env) e u_b in
           let c = Constraints.union c1
             @@ Constraints.union c2
-            @@ Constraints.union c3
-            @@ Constraints.union c4
-            @@ Constraints.union c5
-            @@ Constraints.union c6
+            @@ Constraints.union (Constraints.singleton @@ CConsistent (u2, u4))
             @@ Constraints.singleton
             @@ CConsistent (u_d, u_d') in
-          u, u_a, c
+          u1, u3, c
         | Reset (_, e, u) ->
           let u_a = b in
           let u_b, u_b', c = generate_constraints env e u in
@@ -428,7 +439,8 @@ module GSR = struct
             let unify = unify c1 in
             let u1 = subst_type_substitutions u1 unify in
             (* let env = subst_env_substitutions env unify in *) (* problem *)
-            let _ = subst_exp_substitutions e1 unify in
+            (* let _ = subst_exp_substitutions e1 unify in *)
+            let v = subst_tv_substitutions v unify in
             let xs = closure_tyvars1 u1 env v in
             let us1 = TyScheme (xs,u1) in
             let a, _, c2 = generate_constraints (Environment.add id us1 env) e2 u_b in
@@ -465,8 +477,7 @@ module GSR = struct
           let TyScheme (xs, u) = Environment.find x env in
           let ftvs = ftv_ty u in
           let s = Utils.List.zip xs !ys in
-          let ys = List.map (fun (x, u) -> if TV.mem x ftvs then CSR.Ty u else CSR.TyNu) s
-          in
+          let ys = List.map (fun (x, u) -> if TV.mem x ftvs then CSR.Ty u else CSR.TyNu) s in
           let ys = ys @ Utils.List.repeat CSR.TyNu (List.length xs - List.length ys) in
           let u = subst_type2 (List.filter (fun (x, _) -> TV.mem x ftvs) s) u in
           CSR.Var (r, x, ys), u, u_b
@@ -503,8 +514,10 @@ module GSR = struct
         | _ -> raise @@ Type_fatal_error "app: not consistent"
       end
     | Shift (r, k, u_s, e) ->
-      let f, u_d, u_d' = translate (Environment.add k (tysc_of_ty u_s) env) e u_b in
+      let u_b = u_b in
       let u_g = meet (codc u_s) (codf u_s) in
+      let tysc = begin match u_g with TyVar x -> TyScheme ([x], u_s) | _ -> tysc_of_ty u_s end in
+      let f, u_d, u_d' = translate (Environment.add k tysc env) e u_b in
       let k' = fresh_var () in
       begin match is_consistent u_d u_d', is_consistent (codc u_s) (codf u_s) with
         | true, true ->
@@ -722,7 +735,8 @@ module CSR = struct
         | _ -> raise @@ Type_fatal_error "app"
       end
     | Shift (_, k, us, f) ->
-      let ud, ud' = type_of_exp (Environment.add k (tysc_of_ty us) env) f ub in
+      let tysc = begin match codc us with TyVar xs -> TyScheme ([xs], us) | _ -> tysc_of_ty us end in
+      let ud, ud' = type_of_exp (Environment.add k tysc env) f ub in
       begin match us, (codc us) = (codf us), ud = ud' with
         | TyFun _, true, true -> domf us, domc us
         | _ -> raise @@ Type_fatal_error "shift"

@@ -80,7 +80,7 @@ Expr :
       Reset (r, e, u) }
   | start=SHIFT id=ID RARROW e=Expr {
       let r = join_range start (range_of_exp e) in
-      Shift (r, id.value, Typing.GSR.fresh_tyfun, e) }
+      Shift (r, id.value, Typing.GSR.fresh_tyvar (), e) }
   | start=SHIFT LPAREN id=ID COLON u=Type RPAREN RARROW e=Expr {
       let r = join_range start (range_of_exp e) in
       Shift (r, id.value, u, e) }
@@ -99,7 +99,7 @@ Consq_expr :
   | e1=Consq_expr SEMI e2=Consq_expr {
       let r = join_range (range_of_exp e1) (range_of_exp e2) in
       Consq (r, e1, e2) }
-  | start=IF e1=Consq_expr THEN e2=Consq_expr ELSE e3=Consq_expr {
+  | start=IF e1=Expr THEN e2=Expr ELSE e3=Expr {
       let r = join_range start (range_of_exp e3) in
       If (r, e1, e2, e3) } %prec prec_if
   | e1=Consq_expr op=Op e2=Consq_expr {

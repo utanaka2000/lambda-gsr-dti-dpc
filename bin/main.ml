@@ -3,6 +3,7 @@ open Lambda_dti
 
 type directives = {
   debug: bool;
+  set_reset: bool;
 }
 
 let pp_print_flag ppf f =
@@ -36,7 +37,7 @@ let rec read_eval_print lexbuf env tyenv dirs =
           (* Inference *)
           let u_b = Typing.GSR.fresh_tyvar () in
           let e = Typing.GSR.let_macro e in
-          let e = Typing.GSR.reset_set e in
+          let e = if !dirs.set_reset then Typing.GSR.reset_set e else e in
           print_debug "***** Typing *****\n e: %a\n Uβ: %a\n"
             Pp.GSR.pp_program e
             Pp.pp_print_type u_b;
@@ -82,7 +83,10 @@ let rec read_eval_print lexbuf env tyenv dirs =
           begin match d with
             | Syntax.GSR.BoolDir ("debug", b) ->
               print "debug mode %a\n" pp_print_flag b;
-              dirs := { debug = b }
+              dirs := { !dirs with debug = b }
+            | Syntax.GSR.BoolDir ("set_reset", b) ->
+              print "set_reset %a\n" pp_print_flag b;
+              dirs := { !dirs with set_reset = b }
             | Syntax.GSR.StringDir ("quit") ->
               exit 0
             | _ ->
@@ -127,4 +131,4 @@ let () =
   let lexbuf = Lexing.from_channel stdin in
   let env = Stdlib.env in
   let tyenv = Stdlib.tyenv in
-  read_eval_print lexbuf env tyenv { debug = false }
+  read_eval_print lexbuf env tyenv { debug = false; set_reset = true }

@@ -37,7 +37,7 @@ let rec read_eval_print lexbuf env tyenv dirs =
           (* Inference *)
           let u_b = Typing.GSR.fresh_tyvar () in
           let e = Typing.GSR.let_macro e in
-          let e = if !dirs.set_reset then Typing.GSR.reset_set e else e in
+          let e = if !dirs.set_reset then Typing.GSR.set_reset e u_b else e in
           print_debug "***** Typing *****\n e: %a\n Uβ: %a\n"
             Pp.GSR.pp_program e
             Pp.pp_print_type u_b;

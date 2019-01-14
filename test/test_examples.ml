@@ -31,46 +31,46 @@ let test_cases = [
   ["let x = 10 in let x = 100 in x * x", "int", "10000"];
   (* abstraction *)
   ["fun x -> x + 1", "int/'a -> int/'a", "<fun>"];
-  ["fun (x:?) -> x + 1", "?/'a -> int/'a", "<fun>"];
-  (* ["fun x -> x", "'a -> 'a", "<fun>"]; *)
-  (* ["fun (x: unit) -> ()", "unit -> unit", "<fun>"]; *)
-  (* ["fun (x: int -> bool) -> ()", "(int -> bool) -> unit", "<fun>"]; *)
-  (* ["fun (x: int -> bool -> int) -> ()", "(int -> bool -> int) -> unit", "<fun>"]; *)
-  (* ["fun (x: (int -> bool) -> int) -> ()", "((int -> bool) -> int) -> unit", "<fun>"]; *)
-  (* ["fun (x:'a) (y:'b) -> x y", "('a -> 'b) -> 'a -> 'b", "<fun>"]; *)
+  ["fun (x:?) -> x + 1", "'a/'b -> int/'b", "<fun>"];
+  ["fun x -> x", "'a/'b -> 'a/'b", "<fun>"];
+  ["fun (x: unit) -> ()", "unit/'a -> unit/'a", "<fun>"];
+  ["fun (x: int/'a -> bool/'a) -> ()", "(int/'a -> bool/'a)/'b -> unit/'b", "<fun>"];
+  ["fun (x: int/'a -> (bool/'b -> int/'b)/'a) -> ()", "(int/'a -> (bool/'b -> int/'b)/'a)/'c -> unit/'c", "<fun>"];
+  ["fun (x:'a) (y:'b) -> x y", "('a/'b -> 'c/'d)/'e -> ('a/'b -> 'c/'d)/'e", "<fun>"];
   (* application *)
   ["(fun x -> x + 1) 3", "int", "4"];
   ["(fun (x:?) -> x + 1) 3", "int", "4"];
   ["(fun (x:?) -> x + 1) false", "int", "blame+"];
   ["(fun x y -> x + y) 3 4", "int", "7"];
-  (* ["(fun (x:?) -> x 2) (fun y -> y)", "?", "2: int => ?"];
-  ["(fun (x:?) -> x 2) (fun (y: int) -> y)", "?", "2: int => ?"];
-  ["(fun (x:?) -> x 2) (fun y -> true)", "?", "true: bool => ?"];
-  ["(fun (x:?) -> x) (fun y -> true)", "?", "<fun>: ? -> ? => ?"];
-  ["(fun x -> 1 + ((fun (y:?) -> y) x)) 2", "int", "3"]; *)
+  ["(fun (x:?) -> x 2) (fun y -> y)", "int", "2"];
+  ["(fun (x:?) -> x 2) (fun (y: int) -> y)", "int", "2"];
+  ["(fun (x:?) -> x 2) (fun y -> true)", "bool", "true"];
+  ["(fun (x:?) -> x) (fun y -> true)", "'a/'b -> 'c/'d", "<fun>"];
+  ["(fun x -> 1 + ((fun (y:?) -> y) x)) 2", "int", "3"];
   (* sequence *)
   ["(); 1 + 2", "int", "3"];
   ["(():?); 1 + 2", "int", "3"];
   (* dynamic type inference *)
-  (* ["(fun (f:?) -> f 2) (fun y -> y)", "?", "2: int => ?"];
-  ["(fun (f:?) -> f 2) ((fun x -> x) ((fun (y:?) -> y) (fun z -> z + 1)))", "?", "3: int => ?"];
+  ["(fun (f:?) -> f 2) (fun y -> y)", "int", "2"];
+  ["(fun (f:?) -> f 2) ((fun x -> x) ((fun (y:?) -> y) (fun z -> z + 1)))", "int", "3"];
   ["(fun (x:?) -> (fun y -> y) x) (fun (z:?) -> z + 1) 3", "int", "4"];
   ["(fun x -> x) ((fun (y:?) -> y) (fun x -> x + 1)) 1", "int", "2"];
-  ["(fun (f:?) -> f (); f true) (fun (x:?) -> x)", "?", "true: bool => ?"];
-  ["(fun (f:?) -> f (); f true) (fun x -> x)", "?", "blame-"];
-  ["(fun (f:?) -> let d = f 2 in f true) (fun (x:?) -> x)", "?", "true: bool => ?"];
-  ["(fun (f:?) -> let d = f 2 in f true) (fun x -> x)", "?", "blame-"]; *)
+  ["(fun (f:?) -> f (); f true) (fun (x:?) -> x)", "bool", "true"];
+  ["(fun (f:?) -> f (); f true) (fun x -> x)", "'a", "blame-"];
+  ["(fun (f:?) -> let d = f 2 in f true) (fun (x:?) -> x)", "bool", "true"];
+  ["(fun (f:?) -> let d = f 2 in f true) (fun x -> x)", "'a", "blame-"];
   (* let-poly *)
-  (* ["let s = fun x y z -> x z (y z) in s", "('a -> 'b -> 'c) -> ('a -> 'b) -> 'a -> 'c", "<fun>"];
-  ["let k = fun x y -> x in k", "'a -> 'b -> 'a", "<fun>"];
-  ["let s = fun x y z -> x z (y z) in let k = fun x y -> x in s k k", "'a -> 'a", "<fun>"];
+  (* ["let s = fun x y z -> x z (y z) in s", "'a / 'b -> ('c / 'd -> 'e / 'b) / 'f) / 'g ->
+ (('a / 'f -> 'c / 'h) / 'i -> ('a / 'd -> 'e / 'h) / 'i) / 'g", "<fun>"]; *)
+  (* ["let k = fun x y -> x in k", "'a -> 'b -> 'a", "<fun>"]; *)
+  ["let s = fun x y z -> x z (y z) in let k = fun x y -> x in s k k", "'a/'b -> 'a/'b", "<fun>"];
   ["let s = fun x y z -> x z (y z) in let k = fun x y -> x in s k k 1", "int", "1"];
-  ["let s = fun (x:?) (y:?) (z:?) -> x z (y z) in let k = fun x y -> x in s k k 1", "?", "1: int => ?"];
+  ["let s = fun (x:?) (y:?) (z:?) -> x z (y z) in let k = fun x y -> x in s k k 1", "int", "1"];
   ["let succ x = x + 1 in let twice f x = f (f x) in twice succ 1", "int", "3"];
-  ["let id x = x in let did (x:?) = x in let succ x = x + 1 in (fun (x:?) -> x 1) (id (did succ))", "?", "2: int => ?"];
+  ["let id x = x in let did (x:?) = x in let succ x = x + 1 in (fun (x:?) -> x 1) (id (did succ))", "int", "2"];
   ["let id x = x in id (); id true", "bool", "true"];
-  ["let g = fun x -> ((fun y -> y) : ?->?) x in g (); g 3", "?", "3: int => ?"];
-  ["let f = fun x -> 1 + ((fun (y:?) -> y) x) in 2", "int", "2"]; *)
+  ["let g = fun x -> ((fun y -> y) : ?/?->?/?) x in g (); g 3", "int", "3"];
+  ["let f = fun x -> 1 + ((fun (y:?) -> y) x) in 2", "int", "2"];
   (* toplevel let-poly *)
   (* [
     "let g = fun x -> ((fun y -> y) : ?->?) x", "'a -> ?", "<fun>";
@@ -157,14 +157,30 @@ let test_cases = [
     "f (dyn 2) (dyn true)", "int", "0";
   ]; *)
   (* let-poly & recursion *)
-  (* ["let rec fact n = if n <= 1 then 1 else n * fact (n - 1) in fact 5", "int", "120"]; *)
-  (* ["let rec fact (n:?) = if n <= 1 then 1 else n * fact (n - 1) in fact 5", "int", "120"]; *)
-  (* ["let rec f (x:?) = x in f 2", "int", "2"]; *)
-  (* ["let rec f n x = if n < 0 then x else f (n - 1) x in f 100 true", "bool", "true"]; *)
-  (* ["let rec f (n:?) (x:?) = if n < 0 then x else f (n - 1) x in f 100 true", "bool", "true"]; *)
+  ["let rec fact n = if n < 1 then 1 else n * fact (n - 1) in fact 5", "int", "120"];
+  ["let rec fact (n:?) = if n < 1 then 1 else n * fact (n - 1) in fact 5", "int", "120"];
+  ["let rec f (x:?) = x in f 2", "int", "2"];
+  ["let rec f n = fun x -> if n < 0 then x else f (n - 1) x in f 100 true", "bool", "true"];
+  ["let rec f (n:?) = fun (x:?) -> if n < 0 then x else f (n - 1) x in f 100 true", "bool", "true"];
   (* ["let rec f n (x:?) = if n <= 0 then x else f 0 x in f 0 true", "bool", "true"]; *)
-  (* ["let rec f n (x:?) = if n <= 0 then x else f 0 x in f 10 true", "bool", "true"]; *)
-  (* ["let rec id x = x in id (); id true", "bool", "true"]; *)
+  (* ["let rec f n = fun (x:?) -> if n <= 0 then x else f 0 x in f 10 true", "bool", "true"]; *)
+  ["let rec id x = x in id (); id true", "bool", "true"];
+  (* k of shift is polymorhic *)
+  ["shift k -> if (reset k true) then (if k true then 1 else 2) else 3", "int", "1"];
+  (* let answer type polymorphism *)
+  ["let f = fun x -> x in if (reset f true) then (if f true then 1 else 2) else 3", "int", "1"];
+  ["let f = fun^? (x:?) -> x in if (reset f true) then (if f true then 1 else 2) else 3", "int", "1"];
+  (* pure(e) *)
+  ["pure( 1 )", "int", "1"];
+  ["pure( fun x -> x )", "'a/'b -> 'a/'b", "<fun>"];
+  ["pure( reset( 1 ) )", "int", "1"];
+  ["pure( reset( shift k -> 1 ) )", "int", "1"];
+  ["pure( 1+1 )", "int", "2"];
+  ["pure( shift (k:?) -> k 1 )", "int", "1"];
+  ["pure( shift (k:?) -> k 1 + k 2 )", "int", "blame+"];
+  ["pure( shift (k:?) -> 1 )", "'a", "blame+"];
+  ["pure( (fun^? x -> x) 1 )", "int", "1"]
+
 ]
 
 
@@ -175,7 +191,7 @@ let run env tyenv program =
   let e = parse @@ program ^ ";;" in
   let u_b = Typing.GSR.fresh_tyvar () in
   let e = Typing.GSR.let_macro e in
-  let e = Typing.GSR.reset_set e in
+  let e = Typing.GSR.set_reset e u_b in
   (* let tyenv, e, u = Typing.ITGL.type_of_program tyenv e in
   let tyenv, e, u = Typing.ITGL.normalize tyenv e u in
   let tyenv, f, u' = Typing.ITGL.translate tyenv e in

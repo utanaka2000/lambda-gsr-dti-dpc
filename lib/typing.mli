@@ -43,7 +43,7 @@ module GSR : sig
   val unify : IConstraints.t -> substitutions
   val translate : tysc Environment.t -> exp -> ty -> (CSR.exp * ty * ty)
 
-  val reset_set : program -> program
+  val set_reset : program -> ty -> program
   val generate_constraints_program : tysc Environment.t -> program -> ty -> (ty * ty * IConstraints.t)
   val subst_program : tysc Environment.t -> program -> ty -> ty -> ty -> substitutions -> ( tysc Environment.t * program * ty * ty * ty)
   val translate_program : tysc Environment.t -> program -> ty -> (tysc Environment.t * CSR.program * ty * ty)

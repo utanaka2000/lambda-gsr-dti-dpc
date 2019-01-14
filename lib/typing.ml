@@ -432,22 +432,22 @@ module GSR = struct
             a, u_b, c1
           else
             raise @@ Type_error (Printf.sprintf "pure error")
-        | Let (r, v, id, e1, e2) ->
+        | Let (_, v, id, e1, e2) when is_pure e1 ->
           let u_b = b in
-          let u1, _, c1 = generate_constraints env e1 (fresh_tyvar ()) in
-          if is_pure e1 then
-            let unify = unify c1 in
-            let u1 = subst_type_substitutions u1 unify in
-            (* let env = subst_env_substitutions env unify in *) (* problem *)
-            (* let _ = subst_exp_substitutions e1 unify in *)
-            let v = subst_tv_substitutions v unify in
-            let xs = closure_tyvars1 u1 env v in
-            let us1 = TyScheme (xs,u1) in
-            let a, _, c2 = generate_constraints (Environment.add id us1 env) e2 u_b in
-            let c = Constraints.union c1 c2 in
-            a, u_b, c
-          else
-            generate_constraints env (App (r, Fun (r, fresh_tyvar (), id, fresh_tyvar(), e2), e1)) u_b
+          let alpha = fresh_tyvar () in (* answer type polymorphism *)
+          let u1, _, c1 = generate_constraints env e1 alpha in
+          let s = unify c1 in
+          let u1 = subst_type_substitutions u1 s in
+          let env = subst_env_substitutions env s in
+          let v = subst_tv_substitutions v s in
+          let xs = closure_tyvars1 u1 env v in
+          let ys = TV.elements (ftv_ty alpha) in
+          let tysc = TyScheme (xs @ ys, u1) in
+          let u2, u_a2, c2 = generate_constraints (Environment.add id tysc env) e2 u_b in
+          let c = Constraints.union c1 c2 in
+          u2, u_a2, c
+        | Let (_, _, _, _, _) -> (* because of let_macro, this is not reached *)
+          raise @@ Type_error " let-bind expression must be syntactically pure."
         | Fix (_, x, y, u1, u2, u3, u4, e) ->
           let u_b = b in
           let u = TyFun (u1, u2, u3, u4)  in
@@ -618,13 +618,12 @@ module GSR = struct
       else
         raise @@ Type_fatal_error "Asc not consistent"
 
-  let reset_set = function
+  let set_reset e u_b = match e with
     | Exp e ->
       let r = Syntax.GSR.range_of_exp e in
-      Exp (Reset (r, e, fresh_tyvar ()))
-    | LetDecl (_, _) as e ->
-      e
-    | _ -> raise @@ Type_fatal_error ""
+      Exp (Reset (r, e, u_b))
+    | LetDecl (_, _) as e -> e
+    | _ -> raise @@ Type_fatal_error "set_reset error"
 
   let generate_constraints_program env e u_b = match e with
     | Exp e ->
@@ -648,7 +647,7 @@ module GSR = struct
       let u_b = subst_type_substitutions u_b s in
       let env = subst_env_substitutions env s in
       if u_a <> u_b then begin
-        raise @@ Type_error "LetDecl must be pure."
+        raise @@ Type_error2 ("LetDecl must be pure. Answer types %a and %a", u_a ,u_b)
       end;
       let zs = TV.elements @@ ftv_ty u_b in
       let xs = if is_pure e then zs @ closure_tyvars_let_decl e u env else zs in  (* OK? *)
@@ -669,7 +668,6 @@ module GSR = struct
       env, CSR.LetDecl (x, xs @ ys, f), u, u_a
     | LetDecl (x, e) ->
       let f, u, u_a = translate env e u_b in
-      (* env, CSR.LetDecl (x, TV.elements @@ ftv_ty u_b, f), u, u_a *)
       env, CSR.LetDecl (x, [], f), u, u_a
     | _ -> raise @@ Type_fatal_error ""
 end
@@ -778,7 +776,7 @@ module CSR = struct
     | Let (_, x, xs, f1, f2) when is_pure f1 ->
       let u1, _ = type_of_exp env f1 ub in
       let us1 = TyScheme (xs, u1) in
-      let u2,u_b = type_of_exp (Environment.add x us1 env) f2 ub in
+      let u2, u_b = type_of_exp (Environment.add x us1 env) f2 ub in
       u2, u_b
     | Let _ ->
       raise @@ Type_fatal_error "invalid translation for let expression"

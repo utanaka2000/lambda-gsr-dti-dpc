@@ -424,6 +424,8 @@ module GSR = struct
             @@ Constraints.singleton
             @@ CConsistent (u_1, TyBase TyUnit) in
           u_2, u_a, c
+        | Pure (_, e) when is_pure e ->
+          generate_constraints env e b
         | Pure (_, e) ->
           let u_b = b in
           let a, u_a, c1 = generate_constraints env e TyDyn in
@@ -579,6 +581,8 @@ module GSR = struct
         CSR.Consq (r, cast f1 u1 (TyBase TyUnit), f2), u2, u_a
       else
         raise @@ Type_fatal_error "consq: not consistent"
+    | Pure (_, e) when is_pure e ->
+      translate env e u_b
     | Pure (r, e) ->
       let u_b' = u_b in
       let f, a, u_a  = translate env e TyDyn in

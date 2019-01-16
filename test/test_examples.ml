@@ -192,12 +192,6 @@ let run env tyenv program =
   let u_b = Typing.GSR.fresh_tyvar () in
   let e = Typing.GSR.let_macro e in
   let e = Typing.GSR.set_reset e u_b in
-  (* let tyenv, e, u = Typing.ITGL.type_of_program tyenv e in
-  let tyenv, e, u = Typing.ITGL.normalize tyenv e u in
-  let tyenv, f, u' = Typing.ITGL.translate tyenv e in
-  assert (Typing.is_equal u u');
-  let u'' = Typing.CC.type_of_program tyenv f in
-     assert (Typing.is_equal u u''); *)
   let u, u_a, c = Typing.GSR.generate_constraints_program tyenv e u_b in
   let s = Typing.GSR.unify c in
   let tyenv, e, u, u_a, u_b = Typing.GSR.subst_program tyenv e u u_a u_b s in

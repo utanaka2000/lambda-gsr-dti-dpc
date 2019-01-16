@@ -1,0 +1,62 @@
+lib: [
+  "_build/install/default/lib/lambda-dti/META" {"META"}
+  "_build/install/default/lib/lambda-dti/constraints.ml" {"constraints.ml"}
+  "_build/install/default/lib/lambda-dti/eval.ml" {"eval.ml"}
+  "_build/install/default/lib/lambda-dti/eval.mli" {"eval.mli"}
+  "_build/install/default/lib/lambda-dti/lambda-dti.dune" {"lambda-dti.dune"}
+  "_build/install/default/lib/lambda-dti/lambda_dti.a" {"lambda_dti.a"}
+  "_build/install/default/lib/lambda-dti/lambda_dti.cma" {"lambda_dti.cma"}
+  "_build/install/default/lib/lambda-dti/lambda_dti.cmi" {"lambda_dti.cmi"}
+  "_build/install/default/lib/lambda-dti/lambda_dti.cmt" {"lambda_dti.cmt"}
+  "_build/install/default/lib/lambda-dti/lambda_dti.cmx" {"lambda_dti.cmx"}
+  "_build/install/default/lib/lambda-dti/lambda_dti.cmxa" {"lambda_dti.cmxa"}
+  "_build/install/default/lib/lambda-dti/lambda_dti.cmxs" {"lambda_dti.cmxs"}
+  "_build/install/default/lib/lambda-dti/lambda_dti.ml-gen" {"lambda_dti.ml-gen"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Constraints.cmi" {"lambda_dti__Constraints.cmi"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Constraints.cmt" {"lambda_dti__Constraints.cmt"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Constraints.cmx" {"lambda_dti__Constraints.cmx"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Eval.cmi" {"lambda_dti__Eval.cmi"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Eval.cmt" {"lambda_dti__Eval.cmt"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Eval.cmti" {"lambda_dti__Eval.cmti"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Eval.cmx" {"lambda_dti__Eval.cmx"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Lexer.cmi" {"lambda_dti__Lexer.cmi"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Lexer.cmt" {"lambda_dti__Lexer.cmt"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Lexer.cmx" {"lambda_dti__Lexer.cmx"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Parser.cmi" {"lambda_dti__Parser.cmi"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Parser.cmt" {"lambda_dti__Parser.cmt"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Parser.cmti" {"lambda_dti__Parser.cmti"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Parser.cmx" {"lambda_dti__Parser.cmx"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Pp.cmi" {"lambda_dti__Pp.cmi"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Pp.cmt" {"lambda_dti__Pp.cmt"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Pp.cmx" {"lambda_dti__Pp.cmx"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Stdlib.cmi" {"lambda_dti__Stdlib.cmi"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Stdlib.cmt" {"lambda_dti__Stdlib.cmt"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Stdlib.cmx" {"lambda_dti__Stdlib.cmx"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Syntax.cmi" {"lambda_dti__Syntax.cmi"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Syntax.cmt" {"lambda_dti__Syntax.cmt"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Syntax.cmx" {"lambda_dti__Syntax.cmx"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Typing.cmi" {"lambda_dti__Typing.cmi"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Typing.cmt" {"lambda_dti__Typing.cmt"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Typing.cmti" {"lambda_dti__Typing.cmti"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Typing.cmx" {"lambda_dti__Typing.cmx"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Utils.cmi" {"lambda_dti__Utils.cmi"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Utils.cmt" {"lambda_dti__Utils.cmt"}
+  "_build/install/default/lib/lambda-dti/lambda_dti__Utils.cmx" {"lambda_dti__Utils.cmx"}
+  "_build/install/default/lib/lambda-dti/lexer.ml" {"lexer.ml"}
+  "_build/install/default/lib/lambda-dti/opam" {"opam"}
+  "_build/install/default/lib/lambda-dti/parser.ml" {"parser.ml"}
+  "_build/install/default/lib/lambda-dti/parser.mli" {"parser.mli"}
+  "_build/install/default/lib/lambda-dti/pp.ml" {"pp.ml"}
+  "_build/install/default/lib/lambda-dti/stdlib.ml" {"stdlib.ml"}
+  "_build/install/default/lib/lambda-dti/syntax.ml" {"syntax.ml"}
+  "_build/install/default/lib/lambda-dti/typing.ml" {"typing.ml"}
+  "_build/install/default/lib/lambda-dti/typing.mli" {"typing.mli"}
+  "_build/install/default/lib/lambda-dti/utils.ml" {"utils.ml"}
+]
+bin: [
+  "_build/install/default/bin/ldti" {"ldti"}
+]
+doc: [
+  "_build/install/default/doc/lambda-dti/LICENSE"
+  "_build/install/default/doc/lambda-dti/README.md"
+]

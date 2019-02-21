@@ -612,7 +612,7 @@ module GSR = struct
         let u' = TyFun (u1, u2', u3', u4) in
         let y' = fresh_var () in
         let f' = cast (CSR.Fun(r, u4, y', u1, f)) u' u in
-        CSR.Fix (r, x, y, u1, u2, u3, u4, CSR.App (r, f', Var(r, y, []))), u, u_b
+        CSR.Fix (r, x, y, u1, u2, u3, u4, CSR.App (r, f', CSR.Var(r, y, []))), u, u_b
       else
         raise @@ Type_fatal_error "fix not consistent"
     | Asc (_, e, ty) ->

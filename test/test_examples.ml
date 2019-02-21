@@ -60,9 +60,6 @@ let test_cases = [
   ["(fun (f:?) -> let d = f 2 in f true) (fun (x:?) -> x)", "bool", "true"];
   ["(fun (f:?) -> let d = f 2 in f true) (fun x -> x)", "'a", "blame-"];
   (* let-poly *)
-  (* ["let s = fun x y z -> x z (y z) in s", "'a / 'b -> ('c / 'd -> 'e / 'b) / 'f) / 'g ->
- (('a / 'f -> 'c / 'h) / 'i -> ('a / 'd -> 'e / 'h) / 'i) / 'g", "<fun>"]; *)
-  (* ["let k = fun x y -> x in k", "'a -> 'b -> 'a", "<fun>"]; *)
   ["let s = fun x y z -> x z (y z) in let k = fun x y -> x in s k k", "'a/'b -> 'a/'b", "<fun>"];
   ["let s = fun x y z -> x z (y z) in let k = fun x y -> x in s k k 1", "int", "1"];
   ["let s = fun (x:?) (y:?) (z:?) -> x z (y z) in let k = fun x y -> x in s k k 1", "int", "1"];
@@ -72,16 +69,12 @@ let test_cases = [
   ["let g = fun x -> ((fun y -> y) : ?/?->?/?) x in g (); g 3", "int", "3"];
   ["let f = fun x -> 1 + ((fun (y:?) -> y) x) in 2", "int", "2"];
   (* toplevel let-poly *)
-  (* [
-    "let g = fun x -> ((fun y -> y) : ?->?) x", "'a -> ?", "<fun>";
-    "g (); g true", "?", "true: bool => ?";
-  ]; *)
-  (* [ *)
-    (* "let f = (fun x -> x) (fun y -> y)", "'a -> 'a", "<fun>";
-    "f", "'a -> 'a", "<fun>";
+  [
+    (* "let f = (fun x -> x) (fun y -> y)", "'a/'b -> 'a/'b", "<fun>";
+    "f", "'a/'b -> 'a/'b", "<fun>";
     "f 3", "int", "3";
-    "f", "int -> int", "<fun>";
-  ]; *)
+    "f", "int -> int", "<fun>"; *)
+  ];
   (* [
     "let twice f x = f (f x)", "('a -> 'a) -> 'a -> 'a", "<fun>";
     "twice succ 3", "int", "5";
@@ -179,8 +172,11 @@ let test_cases = [
   ["pure( shift (k:?) -> k 1 )", "int", "1"];
   ["pure( shift (k:?) -> k 1 + k 2 )", "int", "blame+"];
   ["pure( shift (k:?) -> 1 )", "'a", "blame+"];
-  ["pure( (fun^? x -> x) 1 )", "int", "1"]
-
+  ["pure( (fun^? x -> x) 1 )", "int", "1"];
+  ["pure(shift (k:?) -> k (shift l -> l 1))", "int", "1"];
+  ["pure(shift (k:?) -> k (shift l -> k 1))", "int", "1"];
+  ["pure(shift (k:?) -> k (k 1))", "int", "blame+"];
+  ["pure(shift (k:?) -> k (shift l -> l 1 + 2))", "int", "blame+"]
 ]
 
 

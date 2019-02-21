@@ -140,14 +140,12 @@ let rec eval debug exp env cont =
         eval debug f' env k
       in f ([], []) v k
     in cont @@ FunV f
-
 and cast debug r v u1 u2 p = (* v: u1 => u2 *)
   if debug then
     printf "cast: %a: %a => %a\n"
       Pp.CSR.pp_print_value v
       Pp.pp_print_type u1
       Pp.pp_print_type u2;
-
   match u1, u2 with
   | TyVar (_, { contents = Some u1 }), u2
   | u1, TyVar (_, { contents = Some u2 }) ->
@@ -170,7 +168,6 @@ and cast debug r v u1 u2 p = (* v: u1 => u2 *)
         )
                      | _ -> raise @@ Eval_fatal_error "wrap"
     end
-
   (* Ground *)
   | TyVar (p1, _), TyDyn -> Tagged (P p1, (cast debug r v u1 u1 p))
   | TyPureVar p1, TyDyn -> Tagged (PP p1, (cast debug r v u1 u1 p))

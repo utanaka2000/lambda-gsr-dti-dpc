@@ -1,6 +1,7 @@
 # lambda-gsr-dti-dpc
 
-**lambda-gsr-dti-dpc** is an implementation of the **dynamic purity check** 
+**lambda-gsr-dti-dpc** is an implementation of the **dynamic purity check**. 
+
 This implementation is based on: 
 
 - lambda-gsr(https://github.com/ymyzk/lambda-gsr)
